@@ -12,8 +12,9 @@ before making changes — it is the source of truth for architecture decisions.
   bun build) instead of adding dependencies. chokidar is the only allowed
   server dependency (Bun's native watcher drops events — see DESIGN.md §3).
 - **Never a whole-page diff view.** Change indication is subtle gutter marks;
-  clicking expands that individual hunk's diff inline, in place. This is a
-  core interaction principle, not a styling detail.
+  clicking opens that individual hunk's diff in a popup anchored at the mark
+  (JetBrains-style popover). This is a core interaction principle, not a
+  styling detail.
 - **Catppuccin only**: Latte (light) / Mocha (dark), via @catppuccin/palette
   CSS variables and Shiki's bundled catppuccin themes, dual-theme CSS trick.
 - Plain ESM JavaScript, no TypeScript compile step; JSDoc types where useful.

@@ -28,8 +28,8 @@ GitHub releases — no Bun required by the end user.)
 3. GOOD code rendering (real syntax highlighting, not an afterthought)
 4. Git status shown in the tree; filter to changed/new files
 5. For changed files, a *subtle* indication of *where* changes are; clicking an
-   individual change expands that **individual hunk's diff inline, in place** —
-   never a whole-page diff view
+   individual change opens **that hunk's diff in a popup anchored at the
+   mark** — never a whole-page diff view
 6. Watches the directory tree and keeps open views up to date
 
 Constraints: as little code as possible — assemble best-in-class existing
@@ -106,7 +106,7 @@ the "as little code as possible" constraint:
 │    gen_ipl.py    │ │▌ 13      wb = openpyxl.load_workbook(   │ │
 │ ▾ viewer         │ │▌ 14      sheet = wb.active              │ │
 │    app.js      M │ │  15      return sheet                   │ │
-│    index.html    │ │      ⌄ (clicked — hunk expands inline)  │ │
+│    index.html    │ │      ⌄ (clicked — hunk diff popup)       │ │
 │  README.md     M │ │ ┌─────────────────────────────────────┐ │ │
 │  new_file.md   U │ │ │ - 13  wb = load_workbook(path, ro)  │ │ │
 │                  │ │ │ + 13  wb = openpyxl.load_workbook(  │ │ │
@@ -232,26 +232,25 @@ the server's `hunks`:
 - **Rendered markdown:** any block whose `data-lines` range intersects a
   hunk's new-file range gets a 3px accent left-border.
 
-**Click → inline hunk expansion.** Clicking a gutter bar (or a marked
-markdown block) expands **that hunk only**, in place — the page never
-navigates away:
+**Click → hunk diff popup.** Clicking a gutter mark (or a marked markdown
+block) opens **that hunk only** in a popover anchored at the mark — the
+JetBrains gutter-popup convention; the page never navigates away and the
+document flow never shifts:
 
-- An expansion panel is inserted into the document flow directly below the
-  last line of the hunk (below the marked block, for markdown). Content
-  stays put above; content below shifts down, exactly like VS Code's
-  dirty-diff peek or GitHub's expanded comment threads.
-- The panel body is diff2html rendering *just that hunk*: the client wraps
-  the hunk's `patch` in a minimal synthesized diff header and calls
-  `Diff2HtmlUI` on it. Unified view by default; a per-panel toggle offers
-  side-by-side. Deleted lines therefore appear only inside the panel —
-  the main view always shows the current file.
-- Toggle behavior: click again (or the panel's ✕, or `Esc`) collapses it.
-  Multiple hunks can be open at once. A subtle "N changes" chip in the
-  header offers expand-all/collapse-all for review-the-whole-file flow.
-- On SSE-driven re-render, expanded panels re-attach to the hunk nearest
-  their old `newStart` if it still exists; vanished hunks close silently.
+- The popup is absolutely positioned just below the clicked mark, inside
+  the scroll container, so it scrolls with the content. One popup is open
+  at a time; clicking another mark moves it there.
+- The popup body is diff2html rendering *just that hunk*: the client wraps
+  the hunk's `patch` in a minimal synthesized diff header. Unified view by
+  default; a toggle offers side-by-side. Deleted lines therefore appear
+  only inside the popup — the main view always shows the current file.
+- Dismissal: click the mark again, the popup's ✕, `Esc`, or anywhere
+  outside the popup. A subtle "N changes" chip in the header cycles
+  through the changes for review-the-whole-file flow.
+- On SSE-driven re-render, an open popup re-attaches to the hunk nearest
+  its old `newStart` if one still exists; otherwise it closes silently.
 
-There is deliberately **no whole-page diff mode** — the hunk panel is the
+There is deliberately **no whole-page diff mode** — the hunk popup is the
 only diff representation, so the reading context is never lost.
 
 ### Theming

@@ -136,7 +136,7 @@ function renderDiff(path, hunk, mode) {
 function buildPanel(file, i, mode) {
   const h = file.hunks[i];
   const el = document.createElement("div");
-  el.className = "hunk-panel";
+  el.className = "hunk-popup";
   el.dataset.hunk = i;
   el.dataset.mode = mode;
   el.innerHTML =
@@ -305,19 +305,25 @@ Alpine.data("peruse", () => ({
     }
   },
 
-  // ---- inline hunk panels ----
+  // ---- hunk diff popup (anchored popover, one at a time) ----
   anchorFor(i) {
-    const v = this.$refs.viewer;
-    const mdBlock = v.querySelector(`.md-changed[data-hunk="${i}"]`);
-    if (mdBlock) return mdBlock;
-    const lines = v.querySelectorAll(".line");
-    const [, end] = hunkRange(this.file.hunks[i]);
-    return lines[end - 1] ?? lines[lines.length - 1] ?? null;
+    // topmost mark belonging to hunk i, markdown block or code line
+    return this.$refs.viewer.querySelector(`.md-changed[data-hunk="${i}"], .line[data-hunk="${i}"]`);
   },
-  togglePanel(i) {
-    const existing = this.$refs.viewer.querySelector(`.hunk-panel[data-hunk="${i}"]`);
-    if (existing) { existing.remove(); return; }
-    this.anchorFor(i)?.after(buildPanel(this.file, i, "unified"));
+  openPanel(i, mode = "unified", anchorEl = null) {
+    this.closeAllPanels();
+    const anchor = anchorEl ?? this.anchorFor(i);
+    if (!anchor) return;
+    const popup = buildPanel(this.file, i, mode);
+    this.$refs.viewer.appendChild(popup);
+    const isLine = anchor.classList.contains("line");
+    popup.style.left = `${anchor.offsetLeft + (isLine ? 70 : 0)}px`;
+    popup.style.top = `${anchor.offsetTop + anchor.offsetHeight + 6}px`;
+  },
+  togglePanel(i, anchorEl = null) {
+    const existing = this.$refs.viewer.querySelector(".hunk-popup");
+    if (existing && +existing.dataset.hunk === i) { existing.remove(); return; }
+    this.openPanel(i, "unified", anchorEl);
   },
   flipPanel(panel) {
     const mode = panel.dataset.mode === "unified" ? "split" : "unified";
@@ -327,45 +333,47 @@ Alpine.data("peruse", () => ({
       renderDiff(this.file.path, this.file.hunks[+panel.dataset.hunk], mode);
   },
   closeAllPanels() {
-    for (const p of this.$refs.viewer.querySelectorAll(".hunk-panel")) p.remove();
+    for (const p of this.$refs.viewer.querySelectorAll(".hunk-popup")) p.remove();
   },
-  toggleAllHunks() {
-    const open = this.$refs.viewer.querySelectorAll(".hunk-panel").length;
-    this.closeAllPanels();
-    if (!open) this.file.hunks.forEach((_, i) => this.togglePanel(i));
+  cycleHunk() {
+    const cur = this.$refs.viewer.querySelector(".hunk-popup");
+    const next = ((cur ? +cur.dataset.hunk : -1) + 1) % this.file.hunks.length;
+    const anchor = this.anchorFor(next);
+    if (!anchor) return;
+    anchor.scrollIntoView({ block: "center" });
+    this.openPanel(next, "unified", anchor);
   },
   panelState() {
-    return [...this.$refs.viewer.querySelectorAll(".hunk-panel")].map((p) => ({
+    return [...this.$refs.viewer.querySelectorAll(".hunk-popup")].map((p) => ({
       start: this.file.hunks[+p.dataset.hunk]?.newStart ?? 1, mode: p.dataset.mode,
     }));
   },
   restorePanels(states) {
-    for (const st of states) {
-      let best = -1, dist = Infinity;
-      this.file.hunks.forEach((h, i) => {
-        const d = Math.abs(h.newStart - st.start);
-        if (d < dist) { dist = d; best = i; }
-      });
-      if (best >= 0 && !this.$refs.viewer.querySelector(`.hunk-panel[data-hunk="${best}"]`)) {
-        const panel = buildPanel(this.file, best, st.mode);
-        this.anchorFor(best)?.after(panel);
-      }
-    }
+    const st = states[0];
+    if (!st) return;
+    let best = -1, dist = Infinity;
+    this.file.hunks.forEach((h, i) => {
+      const d = Math.abs(h.newStart - st.start);
+      if (d < dist) { dist = d; best = i; }
+    });
+    if (best >= 0) this.openPanel(best, st.mode);
   },
 
   viewerClick(e) {
     const btn = e.target.closest("button");
-    if (btn?.classList.contains("hp-close")) return btn.closest(".hunk-panel").remove();
-    if (btn?.classList.contains("hp-view")) return this.flipPanel(btn.closest(".hunk-panel"));
-    if (e.target.closest(".hunk-panel")) return;
+    if (btn?.classList.contains("hp-close")) return btn.closest(".hunk-popup").remove();
+    if (btn?.classList.contains("hp-view")) return this.flipPanel(btn.closest(".hunk-popup"));
+    if (e.target.closest(".hunk-popup")) return;
     const a = e.target.closest("a[href]");
     if (a && this.interceptLink(e, a)) return;
     const blk = e.target.closest(".md-changed");
-    if (blk && !e.target.closest("a, input, button")) return this.togglePanel(+blk.dataset.hunk);
+    if (blk && !e.target.closest("a, input, button"))
+      return this.togglePanel(+blk.dataset.hunk, blk);
     const line = e.target.closest(".line");
     if (line?.dataset.hunk !== undefined &&
         e.clientX - line.getBoundingClientRect().left <= GUTTER_PX)
-      this.togglePanel(+line.dataset.hunk);
+      return this.togglePanel(+line.dataset.hunk, line);
+    this.closeAllPanels(); // click anywhere else dismisses the popup
   },
   interceptLink(e, a) {
     const href = a.getAttribute("href");
