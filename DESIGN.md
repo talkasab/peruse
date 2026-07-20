@@ -1,7 +1,7 @@
 # peruse — Design for a Lightweight Local Directory Viewer
 
-**Status:** Design only — not yet implemented. Will live in its own repository;
-this copy is parked here while the design is being discussed.
+**Status:** Implemented (v1) — this document remains the source of truth for
+architecture decisions.
 
 A small web server you run in any local directory that gives you a two-column
 browsing UI: directory tree on the left, rendered file on the right, with

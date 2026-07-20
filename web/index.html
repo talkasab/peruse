@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>peruse</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📖</text></svg>">
+  <link rel="stylesheet" href="/catppuccin.css">
+  <link rel="stylesheet" href="/diff2html.min.css">
+  <link rel="stylesheet" href="/style.css">
+  <script type="module" src="/app.js"></script>
+</head>
+<body x-data="peruse" x-cloak>
+  <header>
+    <span class="brand">peruse</span>
+    <span class="root" x-text="rootLabel" :title="root"></span>
+    <span class="spacer"></span>
+    <label class="toggle" x-show="isRepo">
+      <input type="checkbox" x-model="changedOnly"> changed only
+    </label>
+    <button class="chip" @click="showIgnored = !showIgnored"
+            x-text="showIgnored ? 'hide ignored' : 'show ignored'"></button>
+    <button class="chip theme-btn" @click="toggleTheme()"
+            x-text="theme === 'mocha' ? '☀' : '☾'" title="Toggle theme"></button>
+  </header>
+
+  <main>
+    <nav id="tree">
+      <template x-for="row in rows" :key="row.path">
+        <div class="row"
+             :class="{ selected: row.path === file?.path, dim: row.ignored }"
+             :style="`--depth: ${row.depth}`"
+             @click="rowClick(row)">
+          <span class="chevron"
+                x-text="row.dir ? (changedOnly || open.has(row.path) ? '▾' : '▸') : ''"></span>
+          <span class="name" :class="{ dirname: row.dir }" x-text="row.name"></span>
+          <span class="status" x-show="row.status" :data-s="row.status" x-text="row.status"></span>
+        </div>
+      </template>
+      <div class="tree-empty" x-show="rows.length === 0">no files</div>
+    </nav>
+
+    <section id="pane">
+      <div id="pane-header" x-show="file">
+        <span class="path" x-text="file?.path"></span>
+        <span class="status" x-show="file?.status" :data-s="file?.status" x-text="file?.status"></span>
+        <span class="spacer"></span>
+        <button class="chip" x-show="file?.hunks?.length" @click="toggleAllHunks()"
+                x-text="hunkChip" title="Expand / collapse all hunk diffs"></button>
+        <button class="chip" x-show="isMarkdown && !file?.binary" @click="raw = !raw"
+                x-text="raw ? 'Rendered' : 'Raw'"></button>
+      </div>
+      <div id="viewer-scroll" x-ref="scroll">
+        <div id="viewer" x-ref="viewer"></div>
+        <div class="placeholder" x-show="!file">select a file</div>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

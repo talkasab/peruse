@@ -15,10 +15,10 @@ directory tree on the left, beautifully rendered file on the right.
 - **Catppuccin** — Latte (light) and Mocha (dark), following your system
   preference with a manual toggle
 
-**Status: design phase.** Nothing to run yet — see [DESIGN.md](DESIGN.md) for
-the full architecture, the survey of existing tools, and open questions.
+See [DESIGN.md](DESIGN.md) for the full architecture and the survey of
+existing tools.
 
-## Planned usage
+## Usage
 
 ```bash
 cd some/directory
@@ -46,9 +46,12 @@ in [DESIGN.md](DESIGN.md).
 
 ```bash
 bun install
+bun run build                # bundle web/ → dist/ (required once before serving)
 bun run server/index.js      # serve the repo itself, in dev
-bun run build                # bundle web/ → dist/
 ```
+
+Not yet published to npm; until then, run it from a checkout with
+`bun run bin/peruse.js <path>`.
 
 ## License
 
