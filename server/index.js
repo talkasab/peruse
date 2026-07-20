@@ -58,6 +58,8 @@ async function gitStatus(root) {
   return { ...info, status, ignored };
 }
 
+const MAX_DIR_ENTRIES = 500;
+
 function buildTree(root, gs, dir = "") {
   const nodes = [];
   let entries;
@@ -67,6 +69,14 @@ function buildTree(root, gs, dir = "") {
     (b.isDirectory() - a.isDirectory()) || a.name.localeCompare(b.name));
   for (const e of entries) {
     if (e.name === ".git") continue;
+    // Junk dirs that aren't gitignored (caches, browser profiles) can hold
+    // tens of thousands of entries — cap per directory so the tree JSON and
+    // the DOM stay sane.
+    if (nodes.length >= MAX_DIR_ENTRIES) {
+      nodes.push({ name: `… ${entries.length - nodes.length} more entries not shown`,
+        path: `${dir}/…`, truncated: true });
+      break;
+    }
     const rel = dir ? `${dir}/${e.name}` : e.name;
     if (e.isDirectory()) {
       const isIgnored = gs.ignored.has(rel + "/");
@@ -146,6 +156,24 @@ export async function startServer({ root, port, host, portFixed = false }) {
   const clients = new Set();
   let pendingChanged = new Set(), pendingGit = false, flushTimer = null;
 
+  // Gitignored dirs are never shown expanded, so they're never watched either.
+  // Crucial on macOS, where each watched directory costs a file descriptor
+  // (kqueue, default ulimit 256) — a stray browser-profile or cache dir in the
+  // repo would otherwise starve the whole server. Refreshed on every gitStatus.
+  let ignoredDirs = new Set();
+  const rememberIgnored = (gs) => {
+    ignoredDirs = new Set(
+      [...gs.ignored].filter((p) => p.endsWith("/")).map((p) => p.slice(0, -1)));
+    return gs;
+  };
+  const inIgnoredDir = (rel) => {
+    const parts = rel.split("/");
+    for (let i = 1; i <= parts.length; i++)
+      if (ignoredDirs.has(parts.slice(0, i).join("/"))) return true;
+    return false;
+  };
+  rememberIgnored(await gitStatus(root));
+
   function broadcast() {
     flushTimer = null;
     const payload = `data: ${JSON.stringify({ changed: [...pendingChanged], git: pendingGit })}\n\n`;
@@ -165,7 +193,8 @@ export async function startServer({ root, port, host, portFixed = false }) {
     ignored: (p, stats) => {
       if (stats && !stats.isFile() && !stats.isDirectory()) return true; // sockets, FIFOs, …
       const rel = relative(root, p);
-      return rel.split("/").includes("node_modules") || rel.startsWith(".git/objects");
+      return rel.split("/").includes("node_modules") || rel.startsWith(".git/objects")
+        || inIgnoredDir(rel);
     },
   });
   watcher.on("error", (err) => console.error(`peruse: watcher: ${err.message ?? err}`));
@@ -191,7 +220,7 @@ export async function startServer({ root, port, host, portFixed = false }) {
       const { pathname } = url;
 
       if (pathname === "/api/tree") {
-        const gs = await gitStatus(root);
+        const gs = rememberIgnored(await gitStatus(root));
         return json({ root, isRepo: gs.isRepo, tree: buildTree(root, gs) });
       }
 
@@ -199,7 +228,7 @@ export async function startServer({ root, port, host, portFixed = false }) {
         const sp = safePath(root, url.searchParams.get("path") ?? "");
         if (!sp || !existsSync(sp.abs) || !statSync(sp.abs).isFile())
           return json({ error: "not found" }, 404);
-        const gs = await gitStatus(root);
+        const gs = rememberIgnored(await gitStatus(root));
         const status = gs.status.get(sp.rel) ?? null;
         const buf = new Uint8Array(await Bun.file(sp.abs).arrayBuffer());
         const binary = buf.slice(0, 8192).includes(0);

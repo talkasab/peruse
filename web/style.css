@@ -74,6 +74,7 @@ main { flex: 1; display: grid; grid-template-columns: 280px 1fr; min-height: 0; 
 .row:hover { background: var(--surface0); }
 .row.selected { background: var(--surface0); color: var(--lavender); }
 .row.dim { opacity: 0.45; }
+.row.truncated { opacity: 0.55; font-style: italic; cursor: default; }
 .chevron { width: 12px; flex: none; font-size: 10px; color: var(--overlay1); }
 .name { overflow: hidden; text-overflow: ellipsis; }
 .name.dirname { color: var(--subtext1); font-weight: 550; }

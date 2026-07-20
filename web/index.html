@@ -28,7 +28,7 @@
     <nav id="tree">
       <template x-for="row in rows" :key="row.path">
         <div class="row"
-             :class="{ selected: row.path === file?.path, dim: row.ignored }"
+             :class="{ selected: row.path === file?.path, dim: row.ignored, truncated: row.truncated }"
              :style="`--depth: ${row.depth}`"
              @click="rowClick(row)">
           <span class="chevron"

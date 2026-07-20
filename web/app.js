@@ -193,6 +193,7 @@ Alpine.data("peruse", () => ({
     this.tree = d.tree; this.isRepo = d.isRepo; this.root = d.root;
   },
   rowClick(row) {
+    if (row.truncated) return;
     if (row.dir) {
       this.open.has(row.path) ? this.open.delete(row.path) : this.open.add(row.path);
     } else if (location.hash === `#/${row.path}`) this.onHash();
