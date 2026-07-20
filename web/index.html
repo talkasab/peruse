@@ -55,8 +55,11 @@
                 x-text="raw ? 'Rendered' : 'Raw'"></button>
       </div>
       <div id="viewer-scroll" x-ref="scroll">
+        <div class="render-wait" x-show="loading" x-cloak>
+          <span class="spin"></span> rendering <span x-text="loadingName"></span>…
+        </div>
         <div id="viewer" x-ref="viewer"></div>
-        <div class="placeholder" x-show="!file">select a file</div>
+        <div class="placeholder" x-show="!file && !loading">select a file</div>
       </div>
     </section>
   </main>

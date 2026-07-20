@@ -157,7 +157,7 @@ function hunkRange(h) {
 Alpine.data("peruse", () => ({
   tree: [], isRepo: false, root: "",
   open: new Set(), changedOnly: false, showIgnored: true,
-  file: null, raw: false, theme: "latte",
+  file: null, raw: false, theme: "latte", loading: false, loadingName: "",
 
   async init() {
     this.theme = localStorage.getItem("peruse-theme")
@@ -166,7 +166,15 @@ Alpine.data("peruse", () => ({
     this.$refs.viewer.addEventListener("click", (e) => this.viewerClick(e));
     addEventListener("hashchange", () => this.onHash());
     addEventListener("keydown", (e) => { if (e.key === "Escape") this.closeAllPanels(); });
-    this.$watch("raw", () => this.render());
+    this.$watch("raw", async () => {
+      if ((this.file?.content?.length ?? 0) > 300_000) {
+        this.loading = true;
+        await new Promise(requestAnimationFrame);
+        await new Promise(requestAnimationFrame);
+      }
+      this.render();
+      this.loading = false;
+    });
     await this.refreshTree();
     this.connect();
     this.onHash();
@@ -221,15 +229,28 @@ Alpine.data("peruse", () => ({
   },
 
   async selectFile(path, { preserve = false } = {}) {
+    // Highlighting big files blocks the main thread for a while; show the
+    // indicator and yield two frames so it actually PAINTS first (its spinner
+    // is transform-animated, so the compositor keeps it moving during the
+    // block). Silent-refresh SSE re-renders only indicate when the file is big.
+    this.loadingName = path.split("/").pop();
+    if (!preserve) this.loading = true;
     const r = await fetch(`/api/file?path=${encodeURIComponent(path)}`);
-    if (!r.ok) { this.file = null; this.$refs.viewer.innerHTML = ""; return; }
+    if (!r.ok) { this.file = null; this.loading = false; this.$refs.viewer.innerHTML = ""; return; }
+    const data = await r.json();
+    if (preserve && (data.content?.length ?? 0) > 300_000) this.loading = true;
+    if (this.loading) {
+      await new Promise(requestAnimationFrame);
+      await new Promise(requestAnimationFrame);
+    }
     const scroll = preserve ? this.$refs.scroll.scrollTop : 0;
     const panels = preserve ? this.panelState() : [];
-    this.file = await r.json();
+    this.file = data;
     if (!preserve) this.raw = false;
     this.expandTo(path);
     if (location.hash !== `#/${path}`) location.hash = `#/${path}`;
     this.render();
+    this.loading = false;
     this.$refs.scroll.scrollTop = scroll;
     this.restorePanels(panels);
   },
