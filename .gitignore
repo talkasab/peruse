@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+
+# Build output (bundled client + compiled binaries)
+dist/
+*.exe
+peruse-macos-*
+peruse-linux-*
+peruse-windows-*
+
+# Bun
+.bun/
+bun.lockb.orig
+
+# Logs & debug
+*.log
+npm-debug.log*
+
+# OS cruft
+.DS_Store
+Thumbs.db
+
+# Editors
+.vscode/
+.idea/
+*.swp
+
+# Local environment
+.env
+.env.*
