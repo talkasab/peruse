@@ -155,13 +155,20 @@ export async function startServer({ root, port, host, portFixed = false }) {
     }
   }
 
+  // followSymlinks:false keeps the scan inside the root and off special files
+  // (Chrome's SingletonSocket symlink→unix-socket makes realpath throw
+  // EOPNOTSUPP on macOS); the error handler keeps any remaining scanner
+  // surprise from crashing the server — worst case one directory isn't watched.
   const watcher = chokidar.watch(root, {
     ignoreInitial: true,
-    ignored: (p) => {
+    followSymlinks: false,
+    ignored: (p, stats) => {
+      if (stats && !stats.isFile() && !stats.isDirectory()) return true; // sockets, FIFOs, …
       const rel = relative(root, p);
       return rel.split("/").includes("node_modules") || rel.startsWith(".git/objects");
     },
   });
+  watcher.on("error", (err) => console.error(`peruse: watcher: ${err.message ?? err}`));
   watcher.on("all", (_event, p) => {
     const rel = relative(root, p);
     if (!rel) return;
