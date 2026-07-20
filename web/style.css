@@ -68,19 +68,22 @@ main { flex: 1; display: grid; grid-template-columns: 280px 1fr; min-height: 0; 
 /* tree rows — VS Code explorer conventions: uniform compact rows, rotating
    chevron, folder/file icons, indent guides, git decorations on files AND dirs */
 .row {
-  display: flex; align-items: center; gap: 5px; cursor: pointer;
-  height: 24px; padding: 0 10px 0 calc(8px + var(--depth) * 14px);
+  display: flex; align-items: center; gap: 4px; cursor: pointer;
+  height: 24px; padding: 0 10px 0 calc(4px + var(--depth) * 14px);
   font-size: 13px; line-height: 24px; white-space: nowrap; user-select: none;
   background-image: repeating-linear-gradient(to right, var(--surface1) 0 1px, transparent 1px 14px);
   background-size: calc(var(--depth) * 14px) 100%;
-  background-position: 15px 0; background-repeat: no-repeat;
+  background-position: 10px 0; background-repeat: no-repeat;
 }
 .row:hover { background-color: var(--surface0); }
 .row.selected { background-color: var(--surface0); box-shadow: inset 2px 0 0 var(--lavender); }
-.row.dim { opacity: 0.45; }
+/* gitignored: mute the label, not the whole row — mass opacity looks patchy */
+.row.dim .name { color: var(--overlay0); }
+.row.dim .tree-icon { opacity: 0.45; }
+.row.dim .status { display: none; }
 .row.truncated { opacity: 0.55; font-style: italic; cursor: default; }
 .twist {
-  width: 14px; flex: none; font-size: 10px; color: var(--overlay1);
+  width: 13px; flex: none; font-size: 10px; color: var(--overlay1);
   text-align: center; transition: transform 0.12s; transform-origin: 45% 50%;
 }
 .twist.open { transform: rotate(90deg); }
@@ -102,7 +105,6 @@ main { flex: 1; display: grid; grid-template-columns: 280px 1fr; min-height: 0; 
   width: 7px; height: 7px; border-radius: 50%; flex: none;
   background: var(--yellow); margin-left: auto;
 }
-.row .status + .dirty-dot { margin-left: 0; }
 [data-s="M"] { color: var(--yellow); }
 [data-s="A"], [data-s="U"] { color: var(--green); }
 [data-s="D"] { color: var(--red); }
@@ -167,6 +169,24 @@ main { flex: 1; display: grid; grid-template-columns: 280px 1fr; min-height: 0; 
 .markdown-body input[type="checkbox"] { accent-color: var(--mauve); margin-right: 0.4em; }
 .markdown-body .task-list-item { list-style: none; }
 .markdown-body .task-list-item-checkbox { margin-left: -1.4em; }
+/* YAML frontmatter card */
+table.fm-card {
+  display: table; width: auto; min-width: 50%; border-collapse: collapse;
+  margin-bottom: 22px; background: var(--mantle);
+  border: 1px solid var(--surface0); border-radius: 8px; overflow: hidden;
+  font-size: 12.5px;
+}
+.fm-card th, .fm-card td {
+  border: none; border-bottom: 1px solid var(--surface0);
+  padding: 4px 14px; text-align: left;
+}
+.fm-card tr:last-child th, .fm-card tr:last-child td { border-bottom: none; }
+.fm-card th {
+  font: 600 11.5px ui-monospace, monospace; color: var(--subtext0);
+  background: none; white-space: nowrap; vertical-align: top;
+}
+.fm-card .fm-raw { font-family: ui-monospace, monospace; color: var(--subtext0); }
+
 .image-view { padding: 24px; }
 .image-view img { max-width: 100%; }
 .file-card {

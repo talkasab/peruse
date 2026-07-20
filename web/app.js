@@ -255,7 +255,21 @@ Alpine.data("peruse", () => ({
 
   renderMarkdown(v, f) {
     const dir = f.path.split("/").slice(0, -1).join("/");
-    v.innerHTML = `<article class="markdown-body">${md.render(f.content)}</article>`;
+    // YAML frontmatter → key/value card (GitHub-style), never body text.
+    // The stripped lines are replaced with blanks so markdown-it's source
+    // line maps (data-lines) stay aligned with the file's real line numbers.
+    let body = f.content, fmCard = "";
+    const fm = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(f.content);
+    if (fm) {
+      const rows = fm[1].split(/\r?\n/).map((line) => {
+        const kv = /^([A-Za-z0-9_-]+):\s?(.*)$/.exec(line);
+        return kv ? `<tr><th>${esc(kv[1])}</th><td>${esc(kv[2])}</td></tr>`
+          : `<tr><td colspan="2" class="fm-raw">${esc(line)}</td></tr>`;
+      }).join("");
+      fmCard = `<table class="fm-card">${rows}</table>`;
+      body = "\n".repeat(fm[0].split("\n").length - 1) + f.content.slice(fm[0].length);
+    }
+    v.innerHTML = `<article class="markdown-body">${fmCard}${md.render(body)}</article>`;
     for (const img of v.querySelectorAll("img[src]")) {
       const src = img.getAttribute("src");
       if (!/^([a-z][a-z0-9+.-]*:|\/|#|data:)/i.test(src))

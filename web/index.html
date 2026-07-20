@@ -33,7 +33,7 @@
              @click="rowClick(row)">
           <span class="twist"
                 :class="{ open: row.dir && (changedOnly || open.has(row.path)) }"
-                x-text="row.dir && !row.truncated ? '▸' : ''"></span>
+                x-text="row.dir && row.children?.length ? '▸' : ''"></span>
           <span class="tree-icon" x-show="!row.truncated"
                 :class="row.dir ? 'i-folder' : 'i-file'"></span>
           <span class="name" x-text="row.name"></span>
