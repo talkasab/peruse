@@ -224,8 +224,10 @@ In-file, the *subtle* indicator is the familiar editor gutter mark, driven by
 the server's `hunks`:
 
 - **Code files:** a 3px vertical bar in the gutter beside each hunk's
-  `newStart..newStart+newLines` — Catppuccin green for added, yellow for
-  modified — plus a small red triangle marker where lines were deleted.
+  `newStart..newStart+newLines` — Catppuccin green for added, blue for
+  modified (the VS Code / JetBrains gutter colors; the tree's yellow "M" is
+  the explorer-badge convention, a different palette) — plus a small red
+  triangle marker where lines were deleted.
   Exactly the VS Code / JetBrains gutter convention: legible, ignorable.
 - **Rendered markdown:** any block whose `data-lines` range intersects a
   hunk's new-file range gets a 3px accent left-border.
