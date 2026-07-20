@@ -5,6 +5,23 @@ import { existsSync, statSync } from "node:fs";
 import { networkInterfaces } from "node:os";
 import { startServer } from "../server/index.js";
 
+// The watcher costs one fd per watched path, and stock shells (macOS: 256)
+// are far too small for real trees. Re-exec once through sh with the soft
+// limit raised toward the hard limit; if raising fails, the server's watch
+// budget still keeps us alive, just with fewer live paths.
+if (process.platform !== "win32" && !process.env.PERUSE_FDS_RAISED) {
+  const soft = Number(Bun.spawnSync(["sh", "-c", "ulimit -n"]).stdout.toString().trim()) || 0;
+  if (soft > 0 && soft < 4096) {
+    const proc = Bun.spawnSync(
+      ["sh", "-c", 'ulimit -n 10240 2>/dev/null || ulimit -n "$(ulimit -Hn)" 2>/dev/null; exec "$@"', "sh",
+        process.execPath, ...process.argv.slice(1)],
+      { stdio: ["inherit", "inherit", "inherit"],
+        env: { ...process.env, PERUSE_FDS_RAISED: "1" } },
+    );
+    process.exit(proc.exitCode ?? 0);
+  }
+}
+
 const HELP = `peruse — lightweight local directory viewer
 
 Usage: peruse [path] [options]

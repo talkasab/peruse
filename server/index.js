@@ -192,36 +192,71 @@ export async function startServer({ root, port, host, portFixed = false }) {
   // (soft ulimit is often 256–10240) and an inotify watch on Linux; a huge
   // un-ignored junk dir must cost live updates for its corner of the tree,
   // never the whole server.
-  const WATCH_BUDGET = Number(process.env.PERUSE_WATCH_BUDGET) || 5000;
-  let watchedDirs = 0, budgetWarned = false;
-  const watcher = chokidar.watch(root, {
-    ignoreInitial: true,
-    followSymlinks: false,
-    ignored: (p, stats) => {
-      if (stats && !stats.isFile() && !stats.isDirectory()) return true; // sockets, FIFOs, …
-      const rel = relative(root, p);
-      if (rel.split("/").includes("node_modules") || rel.startsWith(".git/objects")
-        || inIgnoredDir(rel)) return true;
-      if (stats?.isDirectory() && ++watchedDirs > WATCH_BUDGET) {
-        if (!budgetWarned) {
-          budgetWarned = true;
-          console.error(`peruse: more than ${WATCH_BUDGET} directories — ` +
-            `live updates disabled for the rest; gitignore large generated ` +
-            `directories to keep everything live (PERUSE_WATCH_BUDGET overrides)`);
+  // Default budget derives from the process's real fd limit. Empirically each
+  // watched path costs ~2-3 fds under Bun (watch handle + event plumbing), so
+  // an eighth of the limit leaves room for those multiples plus the runtime
+  // baseline, HTTP traffic, and scan-time directory reads — even on a
+  // hard-capped 256-fd process. "unlimited" → cap. The CLI's ulimit re-exec
+  // makes the normal-case limit 10240, i.e. a 1280-path budget.
+  let softFd = 0;
+  try {
+    softFd = Number((await Bun.spawn(["sh", "-c", "ulimit -n"]).stdout.text()).trim()) || 0;
+  } catch {}
+  const WATCH_BUDGET = Number(process.env.PERUSE_WATCH_BUDGET)
+    || (softFd > 0 ? Math.min(5000, Math.floor(softFd / 8)) : 5000);
+  // Below ~1024 fds even the watcher's initial scan (concurrent opendir) can
+  // starve the process, budget or no budget — verified empirically. The CLI
+  // re-execs with a raised limit before we get here, so landing in this branch
+  // means the hard limit itself is tiny: run without live updates rather than
+  // hang. PERUSE_WATCH_BUDGET forces watching on for whoever wants to gamble.
+  const watchable = Number(process.env.PERUSE_WATCH_BUDGET) > 0
+    || softFd === 0 || softFd >= 1024;
+  // The budget counts every distinct path admitted to the watcher — chokidar
+  // holds an fd per watched FILE as well as per directory under Bun, and it
+  // doesn't reliably pass `stats` to this callback, so admission is decided on
+  // first sight of each path and remembered for consistency across calls.
+  const admitted = new Set();
+  let budgetWarned = false;
+  if (!watchable) {
+    console.error(`peruse: fd limit too low (${softFd}) even to scan safely — ` +
+      `live updates disabled; raise \`ulimit -n\` (hard limit) to enable them`);
+  } else {
+    const watcher = chokidar.watch(root, {
+      ignoreInitial: true,
+      followSymlinks: false,
+      ignored: (p, stats) => {
+        if (stats && !stats.isFile() && !stats.isDirectory()) return true; // sockets, FIFOs, …
+        const rel = relative(root, p);
+        if (rel.split("/").includes("node_modules") || rel.startsWith(".git/objects")
+          || inIgnoredDir(rel)) return true;
+        if (!admitted.has(rel)) {
+          if (admitted.size >= WATCH_BUDGET) {
+            if (!budgetWarned) {
+              budgetWarned = true;
+              console.error(`peruse: watch budget (${WATCH_BUDGET} paths, from the fd limit) ` +
+                `reached — live updates disabled for the rest of the tree; gitignore large ` +
+                `generated directories, raise \`ulimit -n\`, or set PERUSE_WATCH_BUDGET`);
+            }
+            return true;
+          }
+          admitted.add(rel);
         }
-        return true;
-      }
-      return false;
-    },
-  });
-  watcher.on("error", (err) => console.error(`peruse: watcher: ${err.message ?? err}`));
-  watcher.on("all", (_event, p) => {
-    const rel = relative(root, p);
-    if (!rel) return;
-    if (rel === ".git" || rel.startsWith(".git/")) pendingGit = true;
-    else pendingChanged.add(rel);
-    if (!flushTimer) flushTimer = setTimeout(broadcast, 200);
-  });
+        return false;
+      },
+    });
+    let watchErrors = 0;
+    watcher.on("error", (err) => {
+      if (++watchErrors <= 3) console.error(`peruse: watcher: ${err.message ?? err}`);
+      else if (watchErrors === 4) console.error("peruse: further watcher errors suppressed");
+    });
+    watcher.on("all", (_event, p) => {
+      const rel = relative(root, p);
+      if (!rel) return;
+      if (rel === ".git" || rel.startsWith(".git/")) pendingGit = true;
+      else pendingChanged.add(rel);
+      if (!flushTimer) flushTimer = setTimeout(broadcast, 200);
+    });
+  }
   setInterval(() => {
     for (const c of clients) { try { c.enqueue(": ping\n\n"); } catch { clients.delete(c); } }
   }, 30_000).unref?.();
