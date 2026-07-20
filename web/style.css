@@ -197,8 +197,13 @@ table.fm-card {
 .fc-meta { color: var(--subtext0); font-size: 12.5px; margin-bottom: 14px; }
 
 /* changed markdown blocks: subtle accent border, click to expand hunk */
-.md-changed { border-left: 3px solid var(--blue); padding-left: 13px; margin-left: -16px; cursor: pointer; }
-.md-changed.md-add { border-left-color: var(--green); cursor: default; }
+/* .markdown-body prefix: must outrank per-block rules (heading margins,
+   blockquote borders), or marked blocks land off-rail / lose their color */
+.markdown-body .md-changed {
+  border-left: 3px solid var(--blue); padding-left: 13px;
+  margin-left: -16px; cursor: pointer;
+}
+.markdown-body .md-changed.md-add { border-left-color: var(--green); cursor: default; }
 
 /* hunk diff popup: anchored popover at the clicked mark, scrolls with content */
 #viewer { position: relative; min-height: 100%; }
