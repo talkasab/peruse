@@ -98,6 +98,37 @@ Decisions:
 5. Sidecar renderer for hunk `agent-context.json`
 6. Herdr keybinding recipe (docs only) for launching peruse
 
+## 6. Keyboard shortcuts
+
+Conventions drawn from the apps this category imitates — GitHub's PR
+"Files changed" view (j/k files, n/p comments/commits, t finder, ? help),
+vim/tig/lazygit two-pane tools (j/k/h/l, Enter/o), and hunk (vim-ish;
+`c` is reserved for creating a note — we must keep that meaning for the
+v1.1 review loop).
+
+Proposed keymap (small core, single keydown listener, disabled while an
+input has focus; `?` shows a cheatsheet overlay):
+
+| Key | Action | Precedent |
+|---|---|---|
+| `j` / `k` / arrows | move selection in tree (≈ next/prev file) | GitHub J/K, tig, Gmail |
+| `Enter` / `o` | open selected file | GitHub |
+| `h` / `l` | collapse / expand directory | nvim-tree, lazygit |
+| `n` / `p` | next / prev change in open file, popup follows | GitHub n/p, vim `]c`/`[c` |
+| `x` / `Space` | toggle popup on current change | GitHub x (expand), lazygit Space |
+| `s` | unified ⇄ split inside open popup | our popup button |
+| `t` | fuzzy file finder (to build) | GitHub t |
+| `f` | toggle changed-only filter | mnemonic (c is taken) |
+| `i` | toggle gitignored visibility | mnemonic |
+| `r` | raw ⇄ rendered markdown | our Raw button |
+| `?` | help overlay | universal |
+| `Esc` | close popup / finder / overlay | already implemented |
+| `c` | **reserved**: comment on current change (v1.1 loop) | hunk |
+
+Deferred: `gg`/`G` (native scroll keys suffice), `y` copy-path, theme-toggle
+key (hunk's `t` is themes — GitHub's finder meaning wins for us).
+
 Open questions for build time: exact Herdr socket protocol (from source);
-whether hunk's TUI keybinding semantics suggest anything for comment UX;
-switcher vs multi-root revisit once the landing page exists.
+hunk's full TUI keymap (read from its source — align any remaining
+conflicts in hunk's favor where GitHub has no opinion); switcher vs
+multi-root revisit once the landing page exists.
