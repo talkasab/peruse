@@ -281,6 +281,9 @@ Alpine.data("peruse", () => ({
       }
     }
     // mark changed blocks (outermost block wins; nested marks would double the border)
+    // Wholly-new files (U/A) get no per-block marks: everything is "added",
+    // so a border on every block is pure noise — the header badge says it all.
+    if (f.status === "U" || f.status === "A") return;
     for (const b of v.querySelectorAll("[data-lines]")) {
       if (b.closest(".md-changed")) continue;
       const [bs, be] = b.dataset.lines.split("-").map(Number);
@@ -301,6 +304,7 @@ Alpine.data("peruse", () => ({
     v.innerHTML = (big ? `<div class="notice">Large file — syntax highlighting disabled</div>` : "")
       + (big ? plainPre(f.content) : hlCode(f.content, lang));
     const lines = v.querySelectorAll(".line");
+    if (f.status === "U" || f.status === "A") return; // wholly-new file: no gutter marks
     f.hunks.forEach((h, i) => {
       const [s, e] = hunkRange(h);
       for (let ln = s; ln <= e; ln++) {

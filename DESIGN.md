@@ -250,7 +250,10 @@ block) opens **that hunk only** in a popover anchored at the mark — the
 JetBrains gutter-popup convention; the page never navigates away and the
 document flow never shifts. Pure additions are the exception: they get the
 green mark but no popup, because the added content is already fully visible
-in the file — only modified and deleted hunks have something extra to show:
+in the file — only modified and deleted hunks have something extra to show.
+Wholly-new files (untracked or staged-new) take that logic to its end: no
+in-file marks at all — the tree/header status badge already announces the
+whole file as new, and a mark on every line/block would be pure noise:
 
 - The popup is absolutely positioned just below the clicked mark, inside
   the scroll container, so it scrolls with the content. One popup is open

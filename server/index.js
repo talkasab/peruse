@@ -4,7 +4,24 @@ import { readdirSync, statSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import chokidar from "chokidar";
 
-const DIST = join(dirname(fileURLToPath(import.meta.url)), "..", "dist");
+const PKG = join(dirname(fileURLToPath(import.meta.url)), "..");
+const DIST = join(PKG, "dist");
+
+// Running from a checkout, a git pull must never silently serve a stale
+// client: rebuild dist/ whenever web/ sources are newer. No-op for the npm
+// package and compiled binaries (no web/ shipped).
+function ensureFreshClient() {
+  const webDir = join(PKG, "web");
+  if (!existsSync(webDir)) return;
+  const newest = Math.max(...readdirSync(webDir)
+    .map((f) => statSync(join(webDir, f)).mtimeMs));
+  const distApp = join(DIST, "app.js");
+  if (!existsSync(distApp) || statSync(distApp).mtimeMs < newest) {
+    console.error("peruse: client sources newer than dist/ — rebuilding…");
+    const r = Bun.spawnSync(["bun", "run", "build"], { cwd: PKG, stdout: "inherit", stderr: "inherit" });
+    if (r.exitCode !== 0) console.error("peruse: build failed — serving the stale client");
+  }
+}
 // Well-known git empty tree — diff base for repos with no commits yet.
 const EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 
@@ -155,6 +172,7 @@ function safePath(root, rel) {
 }
 
 export async function startServer({ root, port, host, portFixed = false }) {
+  ensureFreshClient();
   const clients = new Set();
   let pendingChanged = new Set(), pendingGit = false, flushTimer = null;
 
