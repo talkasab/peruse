@@ -310,15 +310,15 @@ target platform to attach standalone binaries to GitHub releases.
 
 ## 8. Open questions
 
-1. **Gitignored files:** hidden by default with a toggle, or always shown but
-   dimmed? (Design assumes shown-but-dimmed, toggle to hide.)
-2. **Diff baseline:** worktree vs `HEAD` (staged + unstaged together — the
-   design default) or a staged/unstaged distinction like `git diff` vs
-   `git diff --staged`? A dropdown is cheap but is it wanted?
-3. **Mermaid/KaTeX in v1?** Cheap to add; excluded only for leanness.
-4. **Non-git directories:** everything except requirements 4–5 still works;
-   the design degrades gracefully (no status column, no gutter marks).
-   Confirm that's the desired behavior rather than an error.
+All resolved (with Tarik, 2026-07-20) — the design defaults stand:
+
+1. ~~**Gitignored files**~~ Resolved: always shown but dimmed, with a toggle
+   to hide them entirely.
+2. ~~**Diff baseline**~~ Resolved: worktree vs `HEAD` only (staged + unstaged
+   together). No staged/unstaged dropdown.
+3. ~~**Mermaid/KaTeX in v1?**~~ Resolved: deferred to v1.1; v1 ships lean.
+4. ~~**Non-git directories**~~ Resolved: degrade gracefully — no status
+   column, no gutter marks, no changed-only filter, no warning. Not an error.
 5. ~~**Name**~~ Resolved: `peruse`, repo `talkasab/peruse`, published as
    `@talkasab/peruse` (bare npm name is squatted); installed bin is `peruse`.
 

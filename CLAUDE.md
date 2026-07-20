@@ -24,7 +24,9 @@ before making changes — it is the source of truth for architecture decisions.
 npm name `peruse` is squatted → publish as `@talkasab/peruse`, bin `peruse`.
 Standalone binaries via `bun build --compile` attached to GitHub releases.
 
-## Open questions — ask Tarik before deciding
+## Open questions
 
-See DESIGN.md §8: gitignored file display, diff baseline (worktree-vs-HEAD
-is the default), Mermaid/KaTeX in v1, non-git-directory behavior.
+None — all DESIGN.md §8 questions are resolved (see there for the answers):
+gitignored files shown-but-dimmed with a hide toggle, diff baseline is
+worktree-vs-HEAD only, Mermaid/KaTeX deferred to v1.1, non-git directories
+degrade gracefully without a warning.
