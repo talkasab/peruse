@@ -148,21 +148,10 @@ function buildPanel(file, i, mode) {
   return el;
 }
 
-// New-file line range a hunk or mark occupies (deletions anchor to the line above the cut)
+// New-file line range a hunk occupies (deletions anchor to the line above the cut)
 function hunkRange(h) {
   const s = h.newLines === 0 ? Math.max(1, h.newStart) : h.newStart;
   return [s, h.newLines === 0 ? s : h.newStart + h.newLines - 1];
-}
-
-// The -U3 hunk whose panel a gutter mark (from the -U0 diff) belongs to
-function hunkIndexFor(file, ln) {
-  let best = -1, dist = Infinity;
-  file.hunks.forEach((h, i) => {
-    const [s, e] = hunkRange(h);
-    const d = ln < s ? s - ln : ln > e ? ln - e : 0;
-    if (d < dist) { dist = d; best = i; }
-  });
-  return best;
 }
 
 Alpine.data("peruse", () => ({
@@ -275,14 +264,13 @@ Alpine.data("peruse", () => ({
     for (const b of v.querySelectorAll("[data-lines]")) {
       if (b.closest(".md-changed")) continue;
       const [bs, be] = b.dataset.lines.split("-").map(Number);
-      const m = f.marks.find((mk) => {
-        const [ms, me] = hunkRange(mk);
-        return ms <= be && me >= bs;
+      const idx = f.hunks.findIndex((h) => {
+        const [hs, he] = hunkRange(h);
+        return hs <= be && he >= bs;
       });
-      if (m) {
-        b.classList.add("md-changed", m.kind === "added" ? "md-add" : "md-mod");
-        const hunk = hunkIndexFor(f, hunkRange(m)[0]);
-        if (hunk >= 0) b.dataset.hunk = hunk;
+      if (idx >= 0) {
+        b.classList.add("md-changed", f.hunks[idx].kind === "added" ? "md-add" : "md-mod");
+        b.dataset.hunk = idx;
       }
     }
   },
@@ -293,16 +281,15 @@ Alpine.data("peruse", () => ({
     v.innerHTML = (big ? `<div class="notice">Large file — syntax highlighting disabled</div>` : "")
       + (big ? plainPre(f.content) : hlCode(f.content, lang));
     const lines = v.querySelectorAll(".line");
-    for (const m of f.marks) {
-      const [s, e] = hunkRange(m);
-      const hunk = hunkIndexFor(f, s);
+    f.hunks.forEach((h, i) => {
+      const [s, e] = hunkRange(h);
       for (let ln = s; ln <= e; ln++) {
         const el = lines[ln - 1];
         if (!el) break;
-        el.classList.add(m.newLines === 0 ? "hl-del" : m.kind === "added" ? "hl-add" : "hl-mod");
-        if (el.dataset.hunk === undefined && hunk >= 0) el.dataset.hunk = hunk;
+        el.classList.add(h.newLines === 0 ? "hl-del" : h.kind === "added" ? "hl-add" : "hl-mod");
+        if (el.dataset.hunk === undefined) el.dataset.hunk = i;
       }
-    }
+    });
   },
 
   // ---- hunk diff popup (anchored popover, one at a time) ----

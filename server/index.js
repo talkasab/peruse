@@ -101,21 +101,15 @@ function parseHunks(diffText) {
   return hunks;
 }
 
-// hunks (-U3, with context) feed the expandable diff panels; marks (-U0,
-// exact changed lines) drive the gutter indicators, per the editor convention.
+// Zero-context diff: each hunk is one contiguous change, so the gutter marks
+// sit exactly on the changed lines and a popup shows only the clicked change
+// (never neighbors merged in by context, and never the surrounding file).
 async function fileHunks(root, rel, status, base) {
-  if (!status || status === "D") return { hunks: [], marks: [] };
-  const toMark = (h) => ({ newStart: h.newStart, newLines: h.newLines, kind: h.kind });
-  if (status === "U") {
-    const { out } = await git(root, "diff", "--no-index", "--no-color", "-U3", "--", "/dev/null", rel);
-    const hunks = parseHunks(out);
-    return { hunks, marks: hunks.map(toMark) };
-  }
-  const [u3, u0] = await Promise.all([
-    git(root, "diff", base, "--no-color", "-U3", "--", rel),
-    git(root, "diff", base, "--no-color", "-U0", "--", rel),
-  ]);
-  return { hunks: parseHunks(u3.out), marks: parseHunks(u0.out).map(toMark) };
+  if (!status || status === "D") return [];
+  const { out } = status === "U"
+    ? await git(root, "diff", "--no-index", "--no-color", "-U0", "--", "/dev/null", rel)
+    : await git(root, "diff", base, "--no-color", "-U0", "--", rel);
+  return parseHunks(out);
 }
 
 /** Resolve a request path safely under root; returns null on traversal or .git. */
@@ -181,13 +175,11 @@ export async function startServer({ root, port, host }) {
         const status = gs.status.get(sp.rel) ?? null;
         const buf = new Uint8Array(await Bun.file(sp.abs).arrayBuffer());
         const binary = buf.slice(0, 8192).includes(0);
-        const diff = gs.isRepo && !binary
-          ? await fileHunks(root, sp.rel, status, gs.base) : { hunks: [], marks: [] };
         return json({
           path: sp.rel, size: buf.byteLength, binary, status,
           ignored: gs.ignored.has(sp.rel),
           content: binary ? null : new TextDecoder().decode(buf),
-          hunks: diff.hunks, marks: diff.marks,
+          hunks: gs.isRepo && !binary ? await fileHunks(root, sp.rel, status, gs.base) : [],
         });
       }
 

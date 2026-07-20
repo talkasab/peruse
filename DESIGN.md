@@ -141,9 +141,14 @@ never listed or served.
 
 ### Hunk data (requirement 5)
 
-`/api/file` runs `git diff --no-color -U3 -- <path>` (worktree vs `HEAD`, so
+`/api/file` runs `git diff --no-color -U0 -- <path>` (worktree vs `HEAD`, so
 staged and unstaged changes both show; untracked files are diffed against
-empty via `--no-index`) and parses it **once, server-side** into:
+empty via `--no-index`) and parses it **once, server-side** into hunks.
+Zero context is deliberate: each hunk is then exactly one contiguous change,
+so gutter marks sit only on changed lines and a popup shows only the change
+that was clicked — with `-U3`, nearby edits merge into one oversized hunk
+(and the popup drags in unchanged neighbors). Context would be redundant
+anyway: the popup floats over the file itself.
 
 ```json
 "hunks": [
