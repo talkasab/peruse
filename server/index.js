@@ -101,15 +101,35 @@ function parseHunks(diffText) {
   return hunks;
 }
 
-// Zero-context diff: each hunk is one contiguous change, so the gutter marks
-// sit exactly on the changed lines and a popup shows only the clicked change
-// (never neighbors merged in by context, and never the surrounding file).
-async function fileHunks(root, rel, status, base) {
+// Zero-context diff: each hunk is one contiguous change, so gutter marks sit
+// exactly on the changed lines and nearby edits never merge into one hunk
+// (git -U3 would). The popup patch then gets up to 3 context lines re-added
+// around each change from the worktree content, below.
+async function fileHunks(root, rel, status, base, content) {
   if (!status || status === "D") return [];
   const { out } = status === "U"
     ? await git(root, "diff", "--no-index", "--no-color", "-U0", "--", "/dev/null", rel)
     : await git(root, "diff", base, "--no-color", "-U0", "--", rel);
-  return parseHunks(out);
+  const lines = content.replace(/\n$/, "").split("\n");
+  return parseHunks(out).map((h) => withContext(h, lines, 3));
+}
+
+// Context lines are identical on both diff sides, so they can come straight
+// from the current file; only the hunk header math differs per side (a side
+// with count 0 uses the line-after-which convention, hence the +1).
+function withContext(h, lines, ctx) {
+  const start = h.newLines === 0 ? h.newStart + 1 : h.newStart;
+  const before = Math.min(ctx, start - 1);
+  const endNew = h.newLines === 0 ? h.newStart : h.newStart + h.newLines - 1;
+  const after = Math.min(ctx, Math.max(0, lines.length - endNew));
+  const above = lines.slice(start - 1 - before, start - 1).map((l) => " " + l);
+  const below = lines.slice(endNew, endNew + after).map((l) => " " + l);
+  const oldStart = h.oldStart - before + (h.oldLines === 0 ? 1 : 0);
+  const newStart = h.newStart - before + (h.newLines === 0 ? 1 : 0);
+  const header =
+    `@@ -${oldStart},${h.oldLines + before + after} +${newStart},${h.newLines + before + after} @@`;
+  const body = h.patch.split("\n").slice(1);
+  return { ...h, patch: [header, ...above, ...body, ...below].join("\n") };
 }
 
 /** Resolve a request path safely under root; returns null on traversal or .git. */
@@ -175,11 +195,13 @@ export async function startServer({ root, port, host }) {
         const status = gs.status.get(sp.rel) ?? null;
         const buf = new Uint8Array(await Bun.file(sp.abs).arrayBuffer());
         const binary = buf.slice(0, 8192).includes(0);
+        const content = binary ? null : new TextDecoder().decode(buf);
         return json({
           path: sp.rel, size: buf.byteLength, binary, status,
           ignored: gs.ignored.has(sp.rel),
-          content: binary ? null : new TextDecoder().decode(buf),
-          hunks: gs.isRepo && !binary ? await fileHunks(root, sp.rel, status, gs.base) : [],
+          content,
+          hunks: gs.isRepo && !binary
+            ? await fileHunks(root, sp.rel, status, gs.base, content) : [],
         });
       }
 

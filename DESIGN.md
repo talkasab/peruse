@@ -145,10 +145,12 @@ never listed or served.
 staged and unstaged changes both show; untracked files are diffed against
 empty via `--no-index`) and parses it **once, server-side** into hunks.
 Zero context is deliberate: each hunk is then exactly one contiguous change,
-so gutter marks sit only on changed lines and a popup shows only the change
-that was clicked — with `-U3`, nearby edits merge into one oversized hunk
-(and the popup drags in unchanged neighbors). Context would be redundant
-anyway: the popup floats over the file itself.
+so gutter marks sit only on changed lines and each mark's popup covers only
+the change that was clicked — with `-U3`, nearby edits merge into one
+oversized hunk. The server then re-adds up to 3 context lines above and
+below each change into the hunk's `patch` (taken from the worktree content,
+which is identical on both diff sides), giving the popup readable context
+without ever re-merging neighboring changes.
 
 ```json
 "hunks": [
