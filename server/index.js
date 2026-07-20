@@ -142,7 +142,7 @@ function safePath(root, rel) {
   return { abs, rel: inside };
 }
 
-export async function startServer({ root, port, host }) {
+export async function startServer({ root, port, host, portFixed = false }) {
   const clients = new Set();
   let pendingChanged = new Set(), pendingGit = false, flushTimer = null;
 
@@ -176,8 +176,9 @@ export async function startServer({ root, port, host }) {
   const json = (data, status = 200) =>
     Response.json(data, { status });
 
-  const server = Bun.serve({
-    port, hostname: host,
+  // Walk forward from the default port if it's taken; a user-pinned --port fails loudly.
+  const serve = (p) => Bun.serve({
+    port: p, hostname: host,
     async fetch(req) {
       const url = new URL(req.url);
       const { pathname } = url;
@@ -233,12 +234,20 @@ export async function startServer({ root, port, host }) {
       return new Response("not found", { status: 404 });
     },
   });
-  return `http://${host}:${server.port}/`;
+
+  let server;
+  for (let p = port; ; p++) {
+    try { server = serve(p); break; }
+    catch (err) {
+      if (portFixed || err?.code !== "EADDRINUSE" || p >= port + 20) throw err;
+    }
+  }
+  return { port: server.port, host };
 }
 
 // Dev convenience: `bun run server/index.js [path]` serves without the CLI wrapper.
 if (import.meta.main) {
   const root = resolve(process.argv[2] ?? ".");
-  const url = await startServer({ root, port: 7440, host: "127.0.0.1" });
-  console.log(`peruse (dev) — serving ${root}\n  → ${url}`);
+  const { port } = await startServer({ root, port: 7440, host: "127.0.0.1" });
+  console.log(`peruse (dev) — serving ${root}\n  → http://127.0.0.1:${port}/`);
 }

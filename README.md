@@ -31,8 +31,28 @@ Or grab a standalone binary from Releases (no Bun required).
 peruse [path] [--port 7440] [--host 127.0.0.1] [--no-open]
 ```
 
+If the default port is busy, peruse walks forward to the next free one
+(7441, 7442, …). A port given explicitly with `--port` is used as-is, or
+fails if taken.
+
 peruse is read-only: it never modifies the directory it serves, and it binds
 to localhost only by default.
+
+### Browsing from other machines (LAN / Tailscale)
+
+```bash
+peruse --host 0.0.0.0          # bind all interfaces; prints every reachable URL
+peruse --host 100.64.12.34     # or bind only your Tailscale address
+```
+
+With `0.0.0.0`, peruse lists each address a browser could reach it at
+(LAN IP, Tailscale IP, …). Binding just the Tailscale IP keeps it off the
+local network entirely; alternatively keep the localhost default and front
+it with `tailscale serve 7440`.
+
+**Caveat:** peruse has no authentication — anyone who can reach the port can
+read the entire served directory. Only expose directories you'd share with
+everyone on that network.
 
 ## Design at a glance
 

@@ -125,7 +125,10 @@ the "as little code as possible" constraint:
 ## 4. Server design
 
 `peruse [path] [--port 7440] [--host 127.0.0.1] [--no-open]`.
-Binds to localhost only by default. Every request path is resolved and
+Binds to localhost only by default (`--host 0.0.0.0` opens it to LAN/VPN and
+prints every reachable URL — no auth, so that's an explicit opt-in). If the
+default port is busy the server walks forward to the next free one; an
+explicit `--port` is used as-is or fails. Every request path is resolved and
 verified to live under the served root (path-traversal guard). `.git/` is
 never listed or served.
 
