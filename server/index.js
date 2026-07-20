@@ -187,14 +187,31 @@ export async function startServer({ root, port, host, portFixed = false }) {
   // (Chrome's SingletonSocket symlink→unix-socket makes realpath throw
   // EOPNOTSUPP on macOS); the error handler keeps any remaining scanner
   // surprise from crashing the server — worst case one directory isn't watched.
+  // Unconditional backstop, independent of .gitignore: never watch more than
+  // WATCH_BUDGET directories. Each watched dir costs a kqueue fd on macOS
+  // (soft ulimit is often 256–10240) and an inotify watch on Linux; a huge
+  // un-ignored junk dir must cost live updates for its corner of the tree,
+  // never the whole server.
+  const WATCH_BUDGET = Number(process.env.PERUSE_WATCH_BUDGET) || 5000;
+  let watchedDirs = 0, budgetWarned = false;
   const watcher = chokidar.watch(root, {
     ignoreInitial: true,
     followSymlinks: false,
     ignored: (p, stats) => {
       if (stats && !stats.isFile() && !stats.isDirectory()) return true; // sockets, FIFOs, …
       const rel = relative(root, p);
-      return rel.split("/").includes("node_modules") || rel.startsWith(".git/objects")
-        || inIgnoredDir(rel);
+      if (rel.split("/").includes("node_modules") || rel.startsWith(".git/objects")
+        || inIgnoredDir(rel)) return true;
+      if (stats?.isDirectory() && ++watchedDirs > WATCH_BUDGET) {
+        if (!budgetWarned) {
+          budgetWarned = true;
+          console.error(`peruse: more than ${WATCH_BUDGET} directories — ` +
+            `live updates disabled for the rest; gitignore large generated ` +
+            `directories to keep everything live (PERUSE_WATCH_BUDGET overrides)`);
+        }
+        return true;
+      }
+      return false;
     },
   });
   watcher.on("error", (err) => console.error(`peruse: watcher: ${err.message ?? err}`));
