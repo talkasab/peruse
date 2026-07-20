@@ -49,8 +49,11 @@
         <span class="path" x-text="file?.path"></span>
         <span class="status" x-show="file?.status" :data-s="file?.status" x-text="file?.status"></span>
         <span class="spacer"></span>
-        <button class="chip" x-show="reviewable.length" @click="cycleHunk()"
-                x-text="hunkChip" title="Cycle through changes"></button>
+        <span class="chip chip-group" x-show="reviewable.length">
+          <button class="chip-arrow" @click="cycleHunk(-1)" title="Previous change">‹</button>
+          <span x-text="hunkChip"></span>
+          <button class="chip-arrow" @click="cycleHunk(1)" title="Next change">›</button>
+        </span>
         <button class="chip" x-show="isMarkdown && !file?.binary" @click="raw = !raw"
                 x-text="raw ? 'Rendered' : 'Raw'"></button>
       </div>

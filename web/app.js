@@ -301,21 +301,30 @@ Alpine.data("peruse", () => ({
         a.target = "_blank"; a.rel = "noopener";
       }
     }
-    // mark changed blocks (outermost block wins; nested marks would double the border)
+    // Mark the INNERMOST changed blocks. A <ul>'s line range spans the whole
+    // list, so marking the outermost intersecting block would paint every
+    // item over one edited bullet; instead a block is marked only when no
+    // descendant block also intersects a change — the mark lands on the
+    // specific bullet/paragraph that changed.
     // Wholly-new files (U/A) get no per-block marks: everything is "added",
     // so a border on every block is pure noise — the header badge says it all.
     if (f.status === "U" || f.status === "A") return;
+    const cand = new Map();
     for (const b of v.querySelectorAll("[data-lines]")) {
-      if (b.closest(".md-changed")) continue;
       const [bs, be] = b.dataset.lines.split("-").map(Number);
       const idx = f.hunks.findIndex((h) => {
         const [hs, he] = hunkRange(h);
         return hs <= be && he >= bs;
       });
-      if (idx >= 0) {
-        b.classList.add("md-changed", f.hunks[idx].kind === "added" ? "md-add" : "md-mod");
-        if (f.hunks[idx].kind !== "added") b.dataset.hunk = idx;
-      }
+      if (idx >= 0) cand.set(b, idx);
+    }
+    for (const [b, idx] of cand) {
+      let hasDeeper = false;
+      for (const d of b.querySelectorAll("[data-lines]"))
+        if (cand.has(d)) { hasDeeper = true; break; }
+      if (hasDeeper) continue;
+      b.classList.add("md-changed", f.hunks[idx].kind === "added" ? "md-add" : "md-mod");
+      if (f.hunks[idx].kind !== "added") b.dataset.hunk = idx;
     }
   },
 
@@ -369,12 +378,12 @@ Alpine.data("peruse", () => ({
   closeAllPanels() {
     for (const p of this.$refs.viewer.querySelectorAll(".hunk-popup")) p.remove();
   },
-  cycleHunk() {
+  cycleHunk(dir = 1) {
     const r = this.reviewable;
     if (!r.length) return;
     const cur = this.$refs.viewer.querySelector(".hunk-popup");
-    const pos = cur ? r.findIndex(({ i }) => i === +cur.dataset.hunk) : -1;
-    const next = r[(pos + 1) % r.length].i;
+    const pos = cur ? r.findIndex(({ i }) => i === +cur.dataset.hunk) : (dir > 0 ? -1 : 0);
+    const next = r[(pos + dir + r.length) % r.length].i;
     const anchor = this.anchorFor(next);
     if (!anchor) return;
     anchor.scrollIntoView({ block: "center" });
