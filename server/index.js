@@ -81,8 +81,10 @@ function buildTree(root, gs, dir = "") {
     if (e.isDirectory()) {
       const isIgnored = gs.ignored.has(rel + "/");
       // Ignored dirs are shown (dimmed) but not walked — keeps the tree small.
-      nodes.push({ name: e.name, path: rel, dir: true, ignored: isIgnored,
-        children: isIgnored ? [] : buildTree(root, gs, rel) });
+      const children = isIgnored ? [] : buildTree(root, gs, rel);
+      // VS Code-style folder decoration: flag dirs containing any change.
+      nodes.push({ name: e.name, path: rel, dir: true, ignored: isIgnored, children,
+        dirty: children.some((c) => (c.dir ? c.dirty : !!c.status)) });
     } else if (e.isFile()) {
       nodes.push({ name: e.name, path: rel, dir: false,
         status: gs.status.get(rel) ?? null, ignored: gs.ignored.has(rel) });

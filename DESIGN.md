@@ -116,9 +116,12 @@ the "as little code as possible" constraint:
 └──────────────────┴─────────────────────────────────────────────┘
 ```
 
-- Tree: collapsible directories, git status letter + Catppuccin color per file
-  (M = yellow, A/U = green, D = red, renamed = teal). A header toggle filters
-  the tree to changed/untracked files only (requirement 4).
+- Tree: VS Code explorer conventions — uniform compact rows, rotating
+  chevrons, folder/file icons, indent guides for nesting depth. Git status
+  letter + Catppuccin color per file (M = yellow, A/U = green, D = red,
+  renamed = teal), and directories containing any change carry a dot badge
+  (explorer.decorations-style propagation). A header toggle filters the tree
+  to changed/untracked files only (requirement 4).
 - Right pane header: file path, git status badge, `[Raw]` toggle for markdown
   source view.
 
@@ -245,7 +248,9 @@ the server's `hunks`:
 **Click → hunk diff popup.** Clicking a gutter mark (or a marked markdown
 block) opens **that hunk only** in a popover anchored at the mark — the
 JetBrains gutter-popup convention; the page never navigates away and the
-document flow never shifts:
+document flow never shifts. Pure additions are the exception: they get the
+green mark but no popup, because the added content is already fully visible
+in the file — only modified and deleted hunks have something extra to show:
 
 - The popup is absolutely positioned just below the clicked mark, inside
   the scroll container, so it scrolls with the content. One popup is open

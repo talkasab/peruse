@@ -210,8 +210,13 @@ Alpine.data("peruse", () => ({
     if (p && p !== this.file?.path) this.selectFile(p);
   },
   get isMarkdown() { return /\.(md|markdown)$/i.test(this.file?.path ?? ""); },
+  // Only modified/deleted hunks have popups; additions are already visible.
+  get reviewable() {
+    return (this.file?.hunks ?? [])
+      .map((h, i) => ({ h, i })).filter(({ h }) => h.kind !== "added");
+  },
   get hunkChip() {
-    const n = this.file?.hunks?.length ?? 0;
+    const n = this.reviewable.length;
     return `${n} change${n === 1 ? "" : "s"}`;
   },
 
@@ -271,7 +276,7 @@ Alpine.data("peruse", () => ({
       });
       if (idx >= 0) {
         b.classList.add("md-changed", f.hunks[idx].kind === "added" ? "md-add" : "md-mod");
-        b.dataset.hunk = idx;
+        if (f.hunks[idx].kind !== "added") b.dataset.hunk = idx;
       }
     }
   },
@@ -288,7 +293,9 @@ Alpine.data("peruse", () => ({
         const el = lines[ln - 1];
         if (!el) break;
         el.classList.add(h.newLines === 0 ? "hl-del" : h.kind === "added" ? "hl-add" : "hl-mod");
-        if (el.dataset.hunk === undefined) el.dataset.hunk = i;
+        // Additions get a mark but no popup — the added content is already
+        // fully visible in the file; there is nothing more to diff.
+        if (h.kind !== "added" && el.dataset.hunk === undefined) el.dataset.hunk = i;
       }
     });
   },
@@ -324,8 +331,11 @@ Alpine.data("peruse", () => ({
     for (const p of this.$refs.viewer.querySelectorAll(".hunk-popup")) p.remove();
   },
   cycleHunk() {
+    const r = this.reviewable;
+    if (!r.length) return;
     const cur = this.$refs.viewer.querySelector(".hunk-popup");
-    const next = ((cur ? +cur.dataset.hunk : -1) + 1) % this.file.hunks.length;
+    const pos = cur ? r.findIndex(({ i }) => i === +cur.dataset.hunk) : -1;
+    const next = r[(pos + 1) % r.length].i;
     const anchor = this.anchorFor(next);
     if (!anchor) return;
     anchor.scrollIntoView({ block: "center" });
@@ -355,7 +365,7 @@ Alpine.data("peruse", () => ({
     const a = e.target.closest("a[href]");
     if (a && this.interceptLink(e, a)) return;
     const blk = e.target.closest(".md-changed");
-    if (blk && !e.target.closest("a, input, button"))
+    if (blk?.dataset.hunk !== undefined && !e.target.closest("a, input, button"))
       return this.togglePanel(+blk.dataset.hunk, blk);
     const line = e.target.closest(".line");
     if (line?.dataset.hunk !== undefined &&

@@ -65,21 +65,44 @@ main { flex: 1; display: grid; grid-template-columns: 280px 1fr; min-height: 0; 
 #viewer-scroll { flex: 1; overflow: auto; }
 .placeholder, .tree-empty { color: var(--overlay0); padding: 30px; text-align: center; }
 
-/* tree rows */
+/* tree rows — VS Code explorer conventions: uniform compact rows, rotating
+   chevron, folder/file icons, indent guides, git decorations on files AND dirs */
 .row {
-  display: flex; align-items: center; gap: 4px; cursor: pointer;
-  padding: 1px 10px 1px calc(10px + var(--depth) * 16px);
-  font-size: 13px; white-space: nowrap; user-select: none;
+  display: flex; align-items: center; gap: 5px; cursor: pointer;
+  height: 24px; padding: 0 10px 0 calc(8px + var(--depth) * 14px);
+  font-size: 13px; line-height: 24px; white-space: nowrap; user-select: none;
+  background-image: repeating-linear-gradient(to right, var(--surface1) 0 1px, transparent 1px 14px);
+  background-size: calc(var(--depth) * 14px) 100%;
+  background-position: 15px 0; background-repeat: no-repeat;
 }
-.row:hover { background: var(--surface0); }
-.row.selected { background: var(--surface0); color: var(--lavender); }
+.row:hover { background-color: var(--surface0); }
+.row.selected { background-color: var(--surface0); box-shadow: inset 2px 0 0 var(--lavender); }
 .row.dim { opacity: 0.45; }
 .row.truncated { opacity: 0.55; font-style: italic; cursor: default; }
-.chevron { width: 12px; flex: none; font-size: 10px; color: var(--overlay1); }
+.twist {
+  width: 14px; flex: none; font-size: 10px; color: var(--overlay1);
+  text-align: center; transition: transform 0.12s; transform-origin: 45% 50%;
+}
+.twist.open { transform: rotate(90deg); }
+.tree-icon {
+  width: 15px; height: 15px; flex: none; background-color: var(--overlay1);
+  mask: center / contain no-repeat;
+}
+.i-folder {
+  background-color: var(--blue);
+  mask-image: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path d="M1.5 3a1 1 0 0 1 1-1h3.6a1 1 0 0 1 .7.3L8.2 3.7h5.3a1 1 0 0 1 1 1V12a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1V3z"/></svg>');
+}
+.i-file {
+  mask-image: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path d="M3.5 1.5h6l3 3v10h-9v-13z" fill="none" stroke="black" stroke-width="1.4"/><path d="M9 1.5v3.5h3.5" fill="none" stroke="black" stroke-width="1.4"/></svg>');
+}
 .name { overflow: hidden; text-overflow: ellipsis; }
-.name.dirname { color: var(--subtext1); font-weight: 550; }
 .row .status, #pane-header .status { margin-left: auto; flex: none; font: 600 11px ui-monospace, monospace; }
 #pane-header .status { margin-left: 0; }
+.dirty-dot {
+  width: 7px; height: 7px; border-radius: 50%; flex: none;
+  background: var(--yellow); margin-left: auto;
+}
+.row .status + .dirty-dot { margin-left: 0; }
 [data-s="M"] { color: var(--yellow); }
 [data-s="A"], [data-s="U"] { color: var(--green); }
 [data-s="D"] { color: var(--red); }
@@ -101,7 +124,7 @@ main { flex: 1; display: grid; grid-template-columns: 280px 1fr; min-height: 0; 
 }
 .shiki .line:last-child:empty { display: none; }
 /* gutter change marks: 3px bar (VS Code convention), triangle for deletions */
-.line.hl-add::before, .line.hl-mod::before, .line.hl-del::before { cursor: pointer; }
+.line.hl-mod::before, .line.hl-del::before { cursor: pointer; }
 .line.hl-add::before { box-shadow: inset 3px 0 0 var(--green); }
 .line.hl-mod::before { box-shadow: inset 3px 0 0 var(--blue); }
 .line.hl-del::before {
@@ -155,7 +178,7 @@ main { flex: 1; display: grid; grid-template-columns: 280px 1fr; min-height: 0; 
 
 /* changed markdown blocks: subtle accent border, click to expand hunk */
 .md-changed { border-left: 3px solid var(--blue); padding-left: 13px; margin-left: -16px; cursor: pointer; }
-.md-changed.md-add { border-left-color: var(--green); }
+.md-changed.md-add { border-left-color: var(--green); cursor: default; }
 
 /* hunk diff popup: anchored popover at the clicked mark, scrolls with content */
 #viewer { position: relative; min-height: 100%; }
