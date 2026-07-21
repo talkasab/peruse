@@ -1,0 +1,40 @@
+# Changelog
+
+All notable changes to peruse are documented here.
+
+The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
+and the project adheres to [Semantic Versioning](https://semver.org/).
+Process: every user-facing change lands with an entry under
+**[Unreleased]**; at release time the section is renamed to the version +
+date and becomes the GitHub release notes (see
+[docs/RELEASING.md](docs/RELEASING.md)).
+
+## [Unreleased]
+
+### Added
+- v1 of peruse: two-column directory browser (tree + rendered file) served
+  by a ~5-route Bun server; GFM markdown (markdown-it) and code (Shiki,
+  Catppuccin dual-theme) rendering; git status in the tree with a
+  changed-only filter; live updates over SSE via a chokidar watcher;
+  Latte/Mocha theming with a persisted toggle; localhost-only by default
+- Per-change gutter marks (blue modified / green added / red deletion
+  wedge) on exactly the changed lines; markdown change marks on a fixed
+  rail left of all content, marking the innermost changed block
+- Click a mark → that change's diff in an anchored popup (unified/split),
+  with 3 context lines and neighboring changes never merged in; `‹ N
+  changes ›` header navigation; pure additions and wholly-new files show
+  marks/badges only, no popups
+- YAML frontmatter rendered as a key/value card; h1/h2 headings pin to the
+  pane top while their section scrolls; "rendering …" pill during heavy
+  highlights
+- Directory tree per VS Code explorer conventions: icons, indent guides,
+  rotating chevrons, dirty-dir dots, muted gitignored entries with a hide
+  toggle
+- CLI: port auto-fallback (pinned `--port` fails loudly), `--host 0.0.0.0`
+  prints every reachable URL (LAN/Tailscale), fd-limit auto-raise
+- Resilience: symlink/socket-proof watcher, gitignored dirs never watched,
+  fd-derived watch budget (`PERUSE_WATCH_BUDGET`), no-watch fallback under
+  hard fd caps, 500-entry per-directory tree cap, automatic client rebuild
+  when running from a checkout with stale `dist/`
+
+[Unreleased]: https://github.com/talkasab/peruse/commits/main

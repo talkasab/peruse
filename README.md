@@ -15,8 +15,10 @@ directory tree on the left, beautifully rendered file on the right.
 - **Catppuccin** — Latte (light) and Mocha (dark), following your system
   preference with a manual toggle
 
-See [DESIGN.md](DESIGN.md) for the full architecture and the survey of
-existing tools.
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the system as implemented,
+[CHANGELOG.md](CHANGELOG.md) for release history, and
+[docs/design-history.md](docs/design-history.md) for the original design
+and the survey of existing tools.
 
 ## Usage
 
@@ -58,9 +60,10 @@ everyone on that network.
 
 A ~5-route Bun server (`Bun.serve`, one dependency: chokidar) plus a single
 static page that composes best-in-class libraries — markdown-it, Shiki,
-diff2html, Alpine.js — bundled at publish time with `bun build`. Under ~900
-lines of glue code total. The interesting decisions and their reasoning are
-in [DESIGN.md](DESIGN.md).
+diff2html, Alpine.js — bundled at publish time with `bun build`. The
+current system is described in [ARCHITECTURE.md](ARCHITECTURE.md); the
+original reasoning is preserved in
+[docs/design-history.md](docs/design-history.md).
 
 ## Development
 

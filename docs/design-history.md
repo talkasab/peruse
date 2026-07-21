@@ -1,7 +1,10 @@
-# peruse — Design for a Lightweight Local Directory Viewer
+# peruse — Original design document (historical)
 
-**Status:** Implemented (v1) — this document remains the source of truth for
-architecture decisions.
+**Status:** Historical record. The original pre-implementation design, its
+research survey, alternatives considered, and the resolved open questions.
+Kept for rationale; **the source of truth for current behavior is
+[ARCHITECTURE.md](../ARCHITECTURE.md)**, updates are narrated in
+[DEVLOG.md](DEVLOG.md), and future work lives in GitHub issues.
 
 A small web server you run in any local directory that gives you a two-column
 browsing UI: directory tree on the left, rendered file on the right, with
