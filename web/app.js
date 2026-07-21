@@ -291,6 +291,18 @@ Alpine.data("peruse", () => ({
       body = "\n".repeat(fm[0].split("\n").length - 1) + f.content.slice(fm[0].length);
     }
     v.innerHTML = `<article class="markdown-body">${fmCard}${md.render(body)}</article>`;
+    // Wrap each h1/h2 section in a <section> so a pinned heading is sticky
+    // only within its own section — the next section pushes it away instead
+    // of stacking on top of it (mismatched heights would ghost through).
+    const article = v.querySelector(".markdown-body");
+    let sec = null;
+    for (const node of [...article.childNodes]) {
+      if (node.nodeType === 1 && /^H[12]$/.test(node.tagName)) {
+        sec = document.createElement("section");
+        article.insertBefore(sec, node);
+        sec.appendChild(node);
+      } else if (sec) sec.appendChild(node);
+    }
     for (const img of v.querySelectorAll("img[src]")) {
       const src = img.getAttribute("src");
       if (!/^([a-z][a-z0-9+.-]*:|\/|#|data:)/i.test(src))

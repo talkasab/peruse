@@ -236,6 +236,15 @@ table.fm-card {
   margin-left: -16px; cursor: pointer;
 }
 .markdown-body .md-changed.md-add { border-left-color: var(--green); cursor: default; }
+/* nested marks (list items etc.): the rail outdent would drag the bullet out
+   of line with its siblings — use a zero-layout-shift inset bar instead */
+.markdown-body :is(ul, ol, blockquote) .md-changed {
+  border-left: none; margin-left: 0; padding-left: 7px;
+  box-shadow: inset 3px 0 0 var(--blue);
+}
+.markdown-body :is(ul, ol, blockquote) .md-changed.md-add {
+  box-shadow: inset 3px 0 0 var(--green);
+}
 
 /* hunk diff popup: anchored popover at the clicked mark, scrolls with content */
 #viewer { position: relative; min-height: 100%; }
