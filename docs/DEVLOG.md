@@ -20,6 +20,24 @@ this is the engineering story.)
   pill measured at viewport top 91, centered at pane center x=780; same
   position at scroll 0.
 
+## 2026-07-21 (evening) — Test suite
+
+- Landed the three-tier suite (44 tests): unit for owned logic (hunk
+  parsing, context-header arithmetic, path guards, render helpers, after
+  extracting `web/lib.js` so tests skip the Shiki boot), integration as
+  the center of gravity (real server + git over HTTP; SSE coalescing,
+  gitignore-skip, 11 s idle survival, port fallback, tiny-budget
+  survival), and four core Chromium journeys carrying the session's
+  incident regressions (rail single-x, innermost marks, popup scope,
+  pinned-header singleton, no body scroll). `startServer` gained a
+  `stop()` handle for tests. CI workflow added (closes #1).
+- Mutation-tested the suite and it earned its keep twice: a wrong
+  assertion (context lines legitimately include neighbor text) and a
+  masked mutation that led to a real discovery — chokidar silently drops
+  the watch on any directory containing a *dangling symlink*, no error
+  event (#17). Fixture now quarantines symlinks in `linkfarm/` so the
+  dead zone can't mask watcher assertions.
+
 ## 2026-07-21 (later) — "Serves nothing" investigation
 
 User-reported total hang on their repo. Investigation notes:

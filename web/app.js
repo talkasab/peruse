@@ -41,19 +41,12 @@ import langTs from "@shikijs/langs/typescript";
 import langXml from "@shikijs/langs/xml";
 import langYaml from "@shikijs/langs/yaml";
 
+import { esc, resolveLang as libResolveLang, langForPath as libLangForPath,
+  resolveRel, fmtSize, hunkRange, splitFrontmatter } from "./lib.js";
+
 const GUTTER_PX = 64;
 const MAX_HL_SIZE = 1_000_000, MAX_HL_LINES = 10_000;
 const IMG_EXTS = new Set(["png", "jpg", "jpeg", "gif", "webp", "ico", "avif", "bmp"]);
-// extension / fence-info → grammar id (grammar aliases also resolve via LOADED)
-const LANG = {
-  js: "javascript", mjs: "javascript", cjs: "javascript", ts: "typescript",
-  mts: "typescript", cts: "typescript", py: "python", rb: "ruby", sh: "shellscript",
-  bash: "shellscript", zsh: "shellscript", shell: "shellscript", yml: "yaml",
-  md: "markdown", markdown: "markdown", htm: "html", rs: "rust", kt: "kotlin",
-  h: "c", cc: "cpp", cxx: "cpp", hpp: "cpp", hh: "cpp", cs: "csharp",
-  mk: "make", makefile: "make", dockerfile: "docker", patch: "diff", svg: "xml",
-  conf: "ini", cfg: "ini", gitignore: "ini", gitattributes: "ini", env: "ini",
-};
 
 const highlighter = await createHighlighterCore({
   themes: [latte, mocha],
@@ -64,19 +57,8 @@ const highlighter = await createHighlighterCore({
   engine: createJavaScriptRegexEngine({ forgiving: true }),
 });
 const LOADED = new Set(highlighter.getLoadedLanguages());
-
-const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-
-function resolveLang(id) {
-  id = (id || "").toLowerCase();
-  return LANG[id] ?? (LOADED.has(id) ? id : "text");
-}
-
-function langForPath(path) {
-  const name = path.split("/").pop().toLowerCase();
-  if (LANG[name.replace(/^\./, "")]) return LANG[name.replace(/^\./, "")];
-  return resolveLang(name.split(".").pop());
-}
+const resolveLang = (id) => libResolveLang(id, LOADED);
+const langForPath = (path) => libLangForPath(path, LOADED);
 
 function plainPre(code) {
   const lines = code.replace(/\n$/, "").split("\n")
@@ -110,21 +92,6 @@ md.renderer.rules.fence = (tokens, idx) => {
   return dl ? out.replace("<pre", `<pre data-lines="${dl}"`) : out;
 };
 
-function resolveRel(dir, rel) {
-  const parts = dir ? dir.split("/") : [];
-  for (const p of rel.split("/")) {
-    if (p === "" || p === ".") continue;
-    if (p === "..") parts.pop(); else parts.push(p);
-  }
-  return parts.join("/");
-}
-
-function fmtSize(n) {
-  if (n < 1024) return `${n} B`;
-  for (const u of ["KB", "MB", "GB"]) { n /= 1024; if (n < 1024) return `${n.toFixed(1)} ${u}`; }
-  return `${n.toFixed(1)} TB`;
-}
-
 function renderDiff(path, hunk, mode) {
   const diff = `--- a/${path}\n+++ b/${path}\n${hunk.patch}\n`;
   return Diff2Html.html(diff, {
@@ -146,12 +113,6 @@ function buildPanel(file, i, mode) {
     `<button class="hp-close" title="Close (Esc)">✕</button></div>` +
     `<div class="hp-body">${renderDiff(file.path, h, mode)}</div>`;
   return el;
-}
-
-// New-file line range a hunk occupies (deletions anchor to the line above the cut)
-function hunkRange(h) {
-  const s = h.newLines === 0 ? Math.max(1, h.newStart) : h.newStart;
-  return [s, h.newLines === 0 ? s : h.newStart + h.newLines - 1];
 }
 
 Alpine.data("peruse", () => ({
@@ -282,15 +243,14 @@ Alpine.data("peruse", () => ({
     // The stripped lines are replaced with blanks so markdown-it's source
     // line maps (data-lines) stay aligned with the file's real line numbers.
     let body = f.content, fmCard = "";
-    const fm = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(f.content);
+    const fm = splitFrontmatter(f.content);
     if (fm) {
-      const rows = fm[1].split(/\r?\n/).map((line) => {
-        const kv = /^([A-Za-z0-9_-]+):\s?(.*)$/.exec(line);
-        return kv ? `<tr><th>${esc(kv[1])}</th><td>${esc(kv[2])}</td></tr>`
-          : `<tr><td colspan="2" class="fm-raw">${esc(line)}</td></tr>`;
-      }).join("");
+      const rows = fm.rows.map((r) =>
+        r.raw !== undefined
+          ? `<tr><td colspan="2" class="fm-raw">${esc(r.raw)}</td></tr>`
+          : `<tr><th>${esc(r.key)}</th><td>${esc(r.value)}</td></tr>`).join("");
       fmCard = `<table class="fm-card">${rows}</table>`;
-      body = "\n".repeat(fm[0].split("\n").length - 1) + f.content.slice(fm[0].length);
+      body = fm.body;
     }
     v.innerHTML = `<article class="markdown-body">${fmCard}${md.render(body)}</article>`;
     // Wrap each h1/h2 section in a <section> so a pinned heading is sticky

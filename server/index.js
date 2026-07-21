@@ -52,7 +52,7 @@ async function gitInfo(root) {
 }
 
 /** Status letter per path (M/A/D/R/U) + set of gitignored paths (dirs end with /). */
-async function gitStatus(root) {
+export async function gitStatus(root) {
   const info = await gitInfo(root);
   const status = new Map();
   const ignored = new Set();
@@ -88,7 +88,7 @@ async function gitStatus(root) {
 
 const MAX_DIR_ENTRIES = 500;
 
-function buildTree(root, gs, dir = "") {
+export function buildTree(root, gs, dir = "") {
   const nodes = [];
   let entries;
   try { entries = readdirSync(join(root, dir), { withFileTypes: true }); }
@@ -123,7 +123,7 @@ function buildTree(root, gs, dir = "") {
 
 const HUNK_RE = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
 
-function parseHunks(diffText) {
+export function parseHunks(diffText) {
   const hunks = [];
   for (const line of diffText.split("\n")) {
     const m = line.match(HUNK_RE);
@@ -157,7 +157,7 @@ async function fileHunks(root, rel, status, base, content) {
 // Context lines are identical on both diff sides, so they can come straight
 // from the current file; only the hunk header math differs per side (a side
 // with count 0 uses the line-after-which convention, hence the +1).
-function withContext(h, lines, ctx) {
+export function withContext(h, lines, ctx) {
   const start = h.newLines === 0 ? h.newStart + 1 : h.newStart;
   const before = Math.min(ctx, start - 1);
   const endNew = h.newLines === 0 ? h.newStart : h.newStart + h.newLines - 1;
@@ -173,7 +173,7 @@ function withContext(h, lines, ctx) {
 }
 
 /** Resolve a request path safely under root; returns null on traversal or .git. */
-function safePath(root, rel) {
+export function safePath(root, rel) {
   rel = rel.replace(/^\/+/, "");
   const abs = resolve(root, rel);
   if (abs !== root && !abs.startsWith(root + "/")) return null;
@@ -248,11 +248,12 @@ export async function startServer({ root, port, host, portFixed = false }) {
   // first sight of each path and remembered for consistency across calls.
   const admitted = new Set();
   let budgetWarned = false;
+  let watcher = null;
   if (!watchable) {
     console.error(`peruse: fd limit too low (${softFd}) even to scan safely — ` +
       `live updates disabled; raise \`ulimit -n\` (hard limit) to enable them`);
   } else {
-    const watcher = chokidar.watch(root, {
+    watcher = chokidar.watch(root, {
       ignoreInitial: true,
       followSymlinks: false,
       ignored: (p, stats) => {
@@ -288,9 +289,10 @@ export async function startServer({ root, port, host, portFixed = false }) {
       if (!flushTimer) flushTimer = setTimeout(broadcast, 200);
     });
   }
-  setInterval(() => {
+  const pingTimer = setInterval(() => {
     for (const c of clients) { try { c.enqueue(": ping\n\n"); } catch { clients.delete(c); } }
-  }, 30_000).unref?.();
+  }, 30_000);
+  pingTimer.unref?.();
 
   const json = (data, status = 200) =>
     Response.json(data, { status });
@@ -370,7 +372,14 @@ export async function startServer({ root, port, host, portFixed = false }) {
       if (portFixed || err?.code !== "EADDRINUSE" || p >= port + 20) throw err;
     }
   }
-  return { port: server.port, host };
+  // stop() is for tests and embedders; the CLI just exits.
+  const stop = async () => {
+    clearInterval(pingTimer);
+    if (flushTimer) clearTimeout(flushTimer);
+    await watcher?.close();
+    server.stop(true);
+  };
+  return { port: server.port, host, stop };
 }
 
 // Dev convenience: `bun run server/index.js [path]` serves without the CLI wrapper.

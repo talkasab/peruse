@@ -150,6 +150,32 @@ rows (depth-annotated), selection via `location.hash` (`#/path`), theme in
 diff2html `--d2h-*` overrides key off the same attribute — one attribute
 flip restyles everything.
 
+## Testing
+
+Three tiers, all run by `bun test` (no test framework dependency;
+`playwright-core` for E2E). Shared fixture: `test/fixture.js` builds a
+throwaway git repo covering every state peruse renders — including the
+shapes behind past incidents (separated edits, sockets/symlinks, ignored
+dirs, oversized dirs). Regression assertions are tagged with the commit
+that fixed the incident they guard.
+
+- `bun test` → **unit** (`test/unit/`: parseHunks, withContext, safePath,
+  buildTree, web/lib.js helpers) + **integration** (`test/integration/`:
+  real server + real git over HTTP — tree/file/raw contracts, SSE
+  coalescing and gitignore-skip, idle-connection survival, port fallback,
+  tiny-watch-budget survival, non-git degradation).
+- `bun run test:e2e` → **core E2E** (`test/e2e/`): four Chromium journeys —
+  smoke, code review (exact marks, popup scope), markdown review (rail
+  single-x measurement, innermost marks, arrows, links, pinned headers,
+  no body scroll), live updates. Chromium binary via `PERUSE_CHROMIUM` or
+  playwright's registry.
+
+CI (`.github/workflows/ci.yml`) runs all tiers on every push/PR.
+
+Known watcher limitation: a directory containing a dangling symlink is
+silently unwatched by chokidar (issue #17); tree/file serving is
+unaffected, only live updates for that directory.
+
 ## Layout invariants
 
 The app never scrolls at the body level: `min-height: 0` on every

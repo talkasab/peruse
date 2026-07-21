@@ -16,6 +16,9 @@
   "scripts": {
     "build": "bun build web/app.js --outdir dist --minify && cp web/index.html web/style.css node_modules/diff2html/bundles/css/diff2html.min.css node_modules/@catppuccin/palette/css/catppuccin.css dist/",
     "start": "bun run bin/peruse.js",
+    "test": "bun test test/unit test/integration",
+    "test:e2e": "bun run build && bun test test/e2e",
+    "test:all": "bun run test && bun run test:e2e",
     "prepublishOnly": "bun run build"
   },
   "dependencies": {
@@ -29,6 +32,7 @@
     "markdown-it-anchor": "^9.2.0",
     "markdown-it-footnote": "^4.0.0",
     "markdown-it-task-lists": "^2.1.1",
+    "playwright-core": "^1.61.1",
     "shiki": "^3.7.0"
   }
 }
