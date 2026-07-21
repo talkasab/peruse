@@ -229,22 +229,18 @@ table.fm-card {
 .fc-meta { color: var(--subtext0); font-size: 12.5px; margin-bottom: 14px; }
 
 /* changed markdown blocks: subtle accent border, click to expand hunk */
-/* .markdown-body prefix: must outrank per-block rules (heading margins,
-   blockquote borders), or marked blocks land off-rail / lose their color */
-.markdown-body .md-changed {
-  border-left: 3px solid var(--blue); padding-left: 13px;
-  margin-left: -16px; cursor: pointer;
+/* Change rail: marks are absolutely-positioned overlay bars in a fixed
+   gutter column at the article's left edge — one x for every mark, no
+   matter how deeply the changed block is nested. Blocks themselves are
+   never restyled or shifted; JS measures each marked block and lays a
+   bar beside it (re-laid on viewer resize). */
+.markdown-body .md-changed { cursor: pointer; }
+.markdown-body .md-changed.md-add { cursor: default; }
+.rail-mark {
+  position: absolute; width: 3px; border-radius: 2px;
+  background: var(--blue); z-index: 3; cursor: pointer;
 }
-.markdown-body .md-changed.md-add { border-left-color: var(--green); cursor: default; }
-/* nested marks (list items etc.): the rail outdent would drag the bullet out
-   of line with its siblings — use a zero-layout-shift inset bar instead */
-.markdown-body :is(ul, ol, blockquote) .md-changed {
-  border-left: none; margin-left: 0; padding-left: 7px;
-  box-shadow: inset 3px 0 0 var(--blue);
-}
-.markdown-body :is(ul, ol, blockquote) .md-changed.md-add {
-  box-shadow: inset 3px 0 0 var(--green);
-}
+.rail-mark.rm-add { background: var(--green); cursor: default; }
 
 /* hunk diff popup: anchored popover at the clicked mark, scrolls with content */
 #viewer { position: relative; min-height: 100%; }

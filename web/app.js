@@ -164,6 +164,8 @@ Alpine.data("peruse", () => ({
       ?? (matchMedia("(prefers-color-scheme: dark)").matches ? "mocha" : "latte");
     this.applyTheme();
     this.$refs.viewer.addEventListener("click", (e) => this.viewerClick(e));
+    // reflow (pane resize, images loading) moves blocks → re-lay the rail
+    new ResizeObserver(() => this.layoutRails()).observe(this.$refs.viewer);
     addEventListener("hashchange", () => this.onHash());
     addEventListener("keydown", (e) => { if (e.key === "Escape") this.closeAllPanels(); });
     this.$watch("raw", async () => {
@@ -338,6 +340,27 @@ Alpine.data("peruse", () => ({
       b.classList.add("md-changed", f.hunks[idx].kind === "added" ? "md-add" : "md-mod");
       if (f.hunks[idx].kind !== "added") b.dataset.hunk = idx;
     }
+    this.layoutRails();
+  },
+
+  // Overlay bars beside each marked block, all on one fixed gutter x.
+  // offsetTop resolves against #viewer (the nearest positioned ancestor),
+  // so nesting depth is irrelevant.
+  layoutRails() {
+    const v = this.$refs.viewer;
+    for (const r of v.querySelectorAll(".rail-mark")) r.remove();
+    const article = v.querySelector(".markdown-body");
+    if (!article) return;
+    const railX = article.offsetLeft + 10;
+    for (const b of v.querySelectorAll(".md-changed")) {
+      const m = document.createElement("span");
+      m.className = "rail-mark" + (b.classList.contains("md-add") ? " rm-add" : "");
+      if (b.dataset.hunk !== undefined) m.dataset.hunk = b.dataset.hunk;
+      m.style.left = `${railX}px`;
+      m.style.top = `${b.offsetTop}px`;
+      m.style.height = `${b.offsetHeight}px`;
+      v.appendChild(m);
+    }
   },
 
   renderCode(v, f) {
@@ -424,6 +447,8 @@ Alpine.data("peruse", () => ({
     if (e.target.closest(".hunk-popup")) return;
     const a = e.target.closest("a[href]");
     if (a && this.interceptLink(e, a)) return;
+    const rail = e.target.closest(".rail-mark");
+    if (rail?.dataset.hunk !== undefined) return this.togglePanel(+rail.dataset.hunk);
     const blk = e.target.closest(".md-changed");
     if (blk?.dataset.hunk !== undefined && !e.target.closest("a, input, button"))
       return this.togglePanel(+blk.dataset.hunk, blk);
