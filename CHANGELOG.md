@@ -35,6 +35,8 @@ date and becomes the GitHub release notes (see
 - Resilience: symlink/socket-proof watcher, gitignored dirs never watched,
   fd-derived watch budget (`PERUSE_WATCH_BUDGET`), no-watch fallback under
   hard fd caps, 500-entry per-directory tree cap, automatic client rebuild
-  when running from a checkout with stale `dist/`
+  when running from a checkout with stale `dist/`, git subprocesses bounded
+  at 30 s with slow-phase logging, SSE connections exempt from Bun's 10 s
+  idle timeout
 
 [Unreleased]: https://github.com/talkasab/peruse/commits/main

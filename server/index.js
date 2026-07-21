@@ -298,6 +298,10 @@ export async function startServer({ root, port, host, portFixed = false }) {
   // Walk forward from the default port if it's taken; a user-pinned --port fails loudly.
   const serve = (p) => Bun.serve({
     port: p, hostname: host,
+    // Bun's default 10 s idleTimeout kills quiet connections — fatal for the
+    // SSE stream (idle by design, pinged every 30 s) and for slow first
+    // /api/tree responses. 0 disables it; the git layer has its own 30 s cap.
+    idleTimeout: 0,
     async fetch(req) {
       const url = new URL(req.url);
       const { pathname } = url;

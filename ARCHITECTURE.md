@@ -70,6 +70,11 @@ arithmetic handles the count-0 line-after-which convention). Fields:
 
 ### Watching → SSE
 
+`Bun.serve` runs with `idleTimeout: 0` — its 10 s default kills idle
+connections, which is fatal for the SSE stream (idle by design, 30 s
+pings) and for slow first responses; the git layer's own 30 s subprocess
+cap provides the real bound.
+
 One chokidar watcher, events coalesced into ~200 ms batches:
 `{"changed": [paths], "git": bool}` (`.git/*` changes set `git`, are never
 forwarded as file events). Clients re-fetch the tree on any event and

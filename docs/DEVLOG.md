@@ -4,6 +4,22 @@ Narrative record of work sessions — what changed, what we learned, and why.
 Newest first. (The [CHANGELOG](../CHANGELOG.md) is the user-facing summary;
 this is the engineering story.)
 
+## 2026-07-21 (later) — "Serves nothing" investigation
+
+User-reported total hang on their repo. Investigation notes:
+- A pristine clone of the tip verified green end-to-end; `git diff` proved
+  the server code was identical to the last version confirmed working on
+  the user's machine → environmental, not a regression.
+- First theory (git stderr piped-but-unread filling the 64 KB pipe) was
+  **disproved by experiment**: Bun drains unread pipes internally. Worth
+  remembering: test the deadlock story before shipping it.
+- Shipped bounded git subprocesses (30 s kill, stderr ignored) + slow-phase
+  logging for `/api/tree`; the hang cleared and the instrumentation
+  surfaced the real residual bug: **Bun.serve's default 10 s `idleTimeout`**
+  had been killing every idle SSE connection (30 s pings never arrived in
+  time) and could axe slow first responses. `idleTimeout: 0`; verified an
+  SSE connection now outlives 10 s idle.
+
 ## 2026-07-21 — Markdown rendering hardening; docs reorganization
 
 - Change marks moved to a **fixed overlay rail**: JS-measured absolute bars
