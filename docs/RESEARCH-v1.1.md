@@ -132,3 +132,21 @@ Open questions for build time: exact Herdr socket protocol (from source);
 hunk's full TUI keymap (read from its source — align any remaining
 conflicts in hunk's favor where GitHub has no opinion); switcher vs
 multi-root revisit once the landing page exists.
+
+## 7. Polish backlog (discussed, deliberately deferred)
+
+- **Highlighting off the main thread.** The rendering pill (shipped) only
+  makes the freeze honest; moving Shiki into a Web Worker (or chunked
+  highlighting) would keep the UI interactive on multi-second files.
+- **Popup placement.** Popups always open below their mark; flip above
+  when the mark is near the bottom of the pane and space is short.
+- **Browse into gitignored directories.** They're listed but not walked
+  (keeps tree/watcher bounded); lazy per-directory expansion on click
+  would make them explorable without unbounding anything.
+- **Deleted files (status D).** Tree shows the D badge but selecting one
+   404s to the empty placeholder; a "deleted — view last committed
+  content?" card would be kinder.
+- **Keyboard shortcuts** (§6): specced, not implemented.
+- **Release binaries + npm publish + CI** (§1): specced, not implemented.
+- **Projects / Herdr / review loop / Neovim** (§2–5): specced, not
+  implemented.

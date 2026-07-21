@@ -66,12 +66,12 @@ in [DESIGN.md](DESIGN.md).
 
 ```bash
 bun install
-bun run build                # bundle web/ → dist/ (required once before serving)
-bun run server/index.js      # serve the repo itself, in dev
+bun run bin/peruse.js <path>     # the server auto-builds dist/ when web/ is newer
 ```
 
-Not yet published to npm; until then, run it from a checkout with
-`bun run bin/peruse.js <path>`.
+Not yet published to npm; until then, run it from a checkout as above.
+Tuning: `PERUSE_WATCH_BUDGET=<n>` caps how many paths the file watcher takes
+on (default derives from the fd limit; the CLI auto-raises a low `ulimit -n`).
 
 ## License
 

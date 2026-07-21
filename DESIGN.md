@@ -196,6 +196,26 @@ One chokidar watcher on the root feeds a broadcast queue consumed by
 This is deliberately dumb — no granular cache invalidation, no tree diffing.
 At local-directory scale, re-fetching JSON is faster than being clever.
 
+### Robustness (learned in the field)
+
+- **Special files:** the watcher never follows symlinks and skips anything
+  that is neither file nor directory (Chrome's `SingletonSocket` symlink
+  crashed the scanner); watcher errors are logged (rate-limited), never fatal.
+- **File-descriptor budget:** under Bun each watched path holds fds, and
+  stock macOS shells allow only 256. The CLI re-execs once with `ulimit -n`
+  raised toward the hard limit; the server additionally watches at most
+  ⅛ of the real fd limit in distinct paths (`PERUSE_WATCH_BUDGET`
+  overrides), never watches gitignored directories (they're never shown
+  expanded), and below ~1024 fds disables watching entirely with a clear
+  message rather than starving the HTTP server.
+- **Tree bounds:** gitignored directories are listed but not walked; any
+  single directory contributes at most 500 tree entries, ending with an
+  inert "… N more" row. Known limitation: contents of gitignored
+  directories aren't browsable (v1.x candidate: lazy expansion).
+- **Stale clients:** when running from a checkout, the server rebuilds
+  `dist/` at startup if `web/` sources are newer — `git pull` can never
+  silently serve an old client.
+
 ## 5. Frontend design
 
 ### Markdown rendering (requirement 2)
@@ -211,6 +231,12 @@ At local-directory scale, re-fetching JSON is faster than being clever.
 - Relative links between files are intercepted and opened *inside* peruse
   (tree selection follows); relative image sources are rewritten to `/raw/…`.
   External links open in a new tab.
+- h1/h2 headings pin to the top of the pane while their section scrolls;
+  each heading + content is wrapped in a `<section>` at render time so the
+  next section pushes the previous heading away (no sticky stacking).
+- Selecting a file shows a floating "rendering …" pill (compositor-animated
+  spinner, so it moves even while Shiki blocks the main thread); shown for
+  silent refreshes only when content exceeds ~300 KB.
 - Optional (v1.1): Mermaid diagram blocks and KaTeX math, each ~5 lines of
   glue with their standard npm builds. Omitted from v1 to keep the page lean.
 
@@ -242,8 +268,15 @@ the server's `hunks`:
   the explorer-badge convention, a different palette) — plus a small red
   triangle marker where lines were deleted.
   Exactly the VS Code / JetBrains gutter convention: legible, ignorable.
-- **Rendered markdown:** any block whose `data-lines` range intersects a
-  hunk's new-file range gets a 3px accent left-border.
+- **Rendered markdown:** a fixed change rail at the article's left edge —
+  overlay bars (absolutely positioned, JS-measured, re-laid on resize)
+  beside each changed block, all sharing one x regardless of nesting.
+  The **innermost** block whose `data-lines` range intersects a hunk gets
+  the mark (marking the outermost would paint a whole list for one edited
+  bullet). Content is never shifted or restyled by marks. Wholly-new
+  files (U/A) get no marks at all. YAML frontmatter renders as a
+  key/value card, with stripped lines replaced by blanks so `data-lines`
+  stays aligned to real file lines.
 
 **Click → hunk diff popup.** Clicking a gutter mark (or a marked markdown
 block) opens **that hunk only** in a popover anchored at the mark — the
