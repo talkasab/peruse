@@ -19,6 +19,14 @@ User-reported total hang on their repo. Investigation notes:
   had been killing every idle SSE connection (30 s pings never arrived in
   time) and could axe slow first responses. `idleTimeout: 0`; verified an
   SSE connection now outlives 10 s idle.
+- Follow-up experiment (challenged on certainty): the default idleTimeout
+  also kills *pending-handler* requests at 10 s with that same log line —
+  so it cannot explain the original indefinite hang, and the earlier
+  speculation linking them is retracted. The original hang remains
+  unexplained but is now bounded (30 s git cap) and instrumented
+  (slow-phase logs), so any recurrence self-identifies. Note: with the
+  idle timeout off, dead SSE sockets are reaped by the 30 s ping erroring
+  out — the ping loop is now the reaper.
 
 ## 2026-07-21 — Markdown rendering hardening; docs reorganization
 
