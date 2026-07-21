@@ -25,10 +25,21 @@ function ensureFreshClient() {
 // Well-known git empty tree — diff base for repos with no commits yet.
 const EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 
+// stderr is IGNORED, never piped-and-unread: a chatty git (permission
+// warnings, advisories) filling an unread 64 KB pipe blocks forever and
+// hangs the request. The timeout bounds any other pathology (dead mounts,
+// index locks); a killed git degrades to "no status" instead of a hang.
 async function git(root, ...args) {
-  const proc = Bun.spawn(["git", ...args], { cwd: root, stdout: "pipe", stderr: "pipe" });
+  const t0 = Date.now();
+  const proc = Bun.spawn(["git", ...args], {
+    cwd: root, stdout: "pipe", stderr: "ignore", timeout: 30_000,
+  });
   const out = await proc.stdout.text();
   const code = await proc.exited;
+  const ms = Date.now() - t0;
+  if (ms > 2000)
+    console.error(`peruse: slow git ${args.join(" ").slice(0, 60)} — ${ms} ms` +
+      (code === 143 ? " (killed by 30 s timeout)" : ""));
   return { code, out };
 }
 
@@ -292,8 +303,13 @@ export async function startServer({ root, port, host, portFixed = false }) {
       const { pathname } = url;
 
       if (pathname === "/api/tree") {
+        const t0 = Date.now();
         const gs = rememberIgnored(await gitStatus(root));
-        return json({ root, isRepo: gs.isRepo, tree: buildTree(root, gs) });
+        const tGit = Date.now();
+        const tree = buildTree(root, gs);
+        if (Date.now() - t0 > 2000)
+          console.error(`peruse: slow /api/tree — git ${tGit - t0} ms, walk ${Date.now() - tGit} ms`);
+        return json({ root, isRepo: gs.isRepo, tree });
       }
 
       if (pathname === "/api/file") {
