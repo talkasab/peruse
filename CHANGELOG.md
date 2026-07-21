@@ -11,6 +11,11 @@ date and becomes the GitHub release notes (see
 
 ## [Unreleased]
 
+### Fixed
+- "Rendering …" pill now pins to the top of the viewport while scrolled
+  (previously it sat at the top of the page content and was invisible when
+  scrolled down) (#14)
+
 ### Added
 - v1 of peruse: two-column directory browser (tree + rendered file) served
   by a ~5-route Bun server; GFM markdown (markdown-it) and code (Shiki,

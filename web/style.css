@@ -76,13 +76,16 @@ main { flex: 1; display: grid; grid-template-columns: 280px 1fr; min-height: 0; 
 /* rendering indicator: transform-animated so the compositor keeps it spinning
    even while Shiki blocks the main thread */
 .render-wait {
-  position: absolute; top: 14px; left: 50%; transform: translateX(-50%);
+  /* sticky: pins to the top of the viewport within #viewer-scroll, so the
+     indicator stays visible at any scroll position; fit-content + auto margins
+     keep the pill shrink-wrapped and centered since sticky is in-flow */
+  position: sticky; top: 14px;
+  width: fit-content; margin-inline: auto;
   z-index: 30; display: flex; align-items: center; gap: 8px;
   background: var(--mantle); border: 1px solid var(--surface1);
   border-radius: 99px; padding: 5px 16px; font-size: 12.5px;
   color: var(--subtext0); box-shadow: 0 4px 14px color-mix(in srgb, var(--crust) 40%, transparent);
 }
-#viewer-scroll { position: relative; }
 .spin {
   width: 13px; height: 13px; border-radius: 50%; flex: none;
   border: 2px solid var(--surface2); border-top-color: var(--mauve);

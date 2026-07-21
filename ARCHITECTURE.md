@@ -135,9 +135,11 @@ rows (depth-annotated), selection via `location.hash` (`#/path`), theme in
     marks but **no popup** (the content is already visible).
   - Header chip `‹ N changes ›` counts and steps through
     modified/deleted changes, scrolling each into view.
-- **Feedback**: selecting a file shows a floating "rendering …" pill; its
-  spinner is transform-animated so the compositor keeps it moving while
-  Shiki blocks the main thread. Shown for silent refreshes only >300 KB.
+- **Feedback**: selecting a file shows a floating "rendering …" pill,
+  `position: sticky` at the top of `#viewer-scroll` so it pins to the
+  viewport at any scroll depth; its spinner is transform-animated so the
+  compositor keeps it moving while Shiki blocks the main thread. Shown for
+  silent refreshes only >300 KB.
 - **Binary/images**: images render via `/raw/`; other binaries show a
   metadata card with a download link.
 

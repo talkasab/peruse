@@ -4,6 +4,22 @@ Narrative record of work sessions — what changed, what we learned, and why.
 Newest first. (The [CHANGELOG](../CHANGELOG.md) is the user-facing summary;
 this is the engineering story.)
 
+## 2026-07-21 (latest) — Rendering pill pins to viewport (#14)
+
+- Bug: `.render-wait` was `position: absolute` inside `#viewer-scroll`, so
+  it scrolled away with the content — scrolled-down users got no render
+  feedback.
+- Fix: `position: sticky; top: 14px` with `width: fit-content;
+  margin-inline: auto` (sticky is in-flow, so the pill needs explicit
+  shrink-wrapping to stay centered). Chosen over `position: fixed`, which
+  needed a hardcoded `calc(50vw + 140px)` to clear the 280 px tree column
+  and overlapped the app header; sticky anchors to the pane naturally and
+  survives layout changes.
+- Verified in Chromium by measuring, not eyeballing: scrolled 2000 px deep
+  with a throttled `/api/file` (2 s route delay to hold the loading state),
+  pill measured at viewport top 91, centered at pane center x=780; same
+  position at scroll 0.
+
 ## 2026-07-21 (later) — "Serves nothing" investigation
 
 User-reported total hang on their repo. Investigation notes:
