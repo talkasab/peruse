@@ -4,7 +4,69 @@ Narrative record of work sessions — what changed, what we learned, and why.
 Newest first. (The [CHANGELOG](../CHANGELOG.md) is the user-facing summary;
 this is the engineering story.)
 
-## 2026-07-21 (latest) — Rendering pill pins to viewport (#14)
+## 2026-07-25 — Review-driven test hardening (58 tests)
+
+An independent review of the suite (commit 42b78c6) found 7/10 injected
+mutants killed and a cluster of dead/vacuous assertions; worked through its
+priority list end to end.
+
+- Dead assertions made real: the `/raw` traversal test used a literal
+  `../../etc/passwd`, which `fetch`'s own URL parser collapses to
+  `/etc/passwd` *before* the request leaves the client — never reaching
+  `safePath` at all. Percent-encoding the slashes too (`%2f`) keeps `..`
+  inside an opaque path segment the URL parser won't normalize, so it now
+  verifiably reaches the guard. Same pattern for `dirty`/`ignored`
+  negatives (added a committed-and-untouched `cleandir` fixture — `bigdir`
+  looked clean but is actually untracked, so `dirty: true`), the
+  `safePath` leading-slash test (was slicing the slash off in the test
+  itself), and the "Next/Previous change" arrow test (asserted popup
+  *presence* twice, which can't fail — now asserts the popup's hunk index
+  actually changes).
+- SSE test hardening: frame reads now buffer until a newline instead of
+  `JSON.parse`-ing a possibly chunk-split line; the gitignored-dir negative
+  test gained a positive control (a sibling file that must still fire) so
+  it can't pass by having simply missed everything; `nextEvent`'s deadline
+  is now computed after `act()` runs, not before.
+- Product fixes (the three sanctioned by review): `startServer` now closes
+  the watcher and ping timer before rethrowing on a failed bind (was
+  leaking both when a pinned `--port` was busy); it returns a `ready`
+  promise that resolves on chokidar's initial-scan-complete (or
+  immediately if watching is disabled), so tests await a real signal
+  instead of a guessed sleep; a new `watchBudget` option takes precedence
+  over `PERUSE_WATCH_BUDGET`, so the fixture no longer mutates
+  `process.env` around an `await` (was a latent race).
+- New unit coverage: `buildTree` (dirs-first sort, dirty propagation
+  through nested clean dirs, ignored-dir walk skip, the 500-cap row) and
+  `gitStatus`'s porcelain-v2 parsing (staged rename incl. the `-z`
+  origPath field skip, repo-prefix slicing for a served subdirectory,
+  unborn-HEAD empty-tree base) — both were previously exercised only
+  incidentally through the HTTP-level integration tests.
+- Attempted, reverted: adding a FIFO to the fixture (to exercise the
+  watcher's `!isFile && !isDirectory` skip) hangs chokidar's initial scan
+  indefinitely under Bun on Linux — reproduced in isolation
+  (`chokidar.watch()` never fires `ready` on a directory containing one).
+  Since fixing that would mean changing watcher behavior beyond the three
+  sanctioned product fixes, the fixture stays without socket/FIFO coverage
+  and the docs say so plainly instead of overclaiming it.
+- E2E: the `pageerror` listener used to `throw`, which doesn't fail a test
+  (listeners aren't on the test's call stack) — now collects into an array
+  asserted empty in `afterEach`. The pinned-header scroll test used a
+  magic `scrollTop = 5000`; now derives the target from the last
+  section's real `offsetTop`. Added a theming journey (toggle Latte/Mocha,
+  assert a Shiki token's and an open popup's computed colors both flip) —
+  its first version was flaky for a subtle reason: `page.goto()` to the
+  *same* URL/hash as the previous test is a no-op (no real reload), so a
+  popup left open by the prior test survived into this one and the test's
+  own click toggled it *closed* instead of open. Fixed with an explicit
+  `Escape` before asserting a known starting state.
+- Verification: `bun test test/unit test/integration` green across 4
+  consecutive runs (~14 s each, dominated by the guarded 11.5 s idle-SSE
+  test); `bun run build && bun test test/e2e` green across 2 runs (~3 s
+  each). Mutation spot-check on a throwaway `/tmp` copy: all three
+  previously-surviving mutants (`/raw` guard removed, `buildTree` dirty
+  always true, `buildTree` ignored always true) are now killed.
+
+## 2026-07-21 (night) — Rendering pill pins to viewport (#14)
 
 - Bug: `.render-wait` was `position: absolute` inside `#viewer-scroll`, so
   it scrolled away with the content — scrolled-down users got no render
@@ -22,7 +84,8 @@ this is the engineering story.)
 
 ## 2026-07-21 (evening) — Test suite
 
-- Landed the three-tier suite (44 tests): unit for owned logic (hunk
+- Landed the three-tier suite (45 tests as landed; 58 after the 2026-07-25
+  hardening pass): unit for owned logic (hunk
   parsing, context-header arithmetic, path guards, render helpers, after
   extracting `web/lib.js` so tests skip the Shiki boot), integration as
   the center of gravity (real server + git over HTTP; SSE coalescing,

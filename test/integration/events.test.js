@@ -7,16 +7,22 @@ let srv, root;
 beforeAll(async () => {
   root = makeFixtureRepo();
   srv = await startFixtureServer(root, 7531);
-  await new Promise((r) => setTimeout(r, 700)); // let the initial scan settle
+  await srv.ready; // wait for the real signal (chokidar's initial scan), not a guessed sleep
 });
 afterAll(async () => { await srv?.cleanup(); });
 
 // Read SSE events from a fresh connection until predicate matches or timeout.
-async function nextEvent(predicate, { timeout = 4000, act } = {}) {
+// `never`, if given, is checked against every event seen (including the one
+// that satisfies `predicate`) and fails fast — used to pair a negative
+// assertion with a positive control so the test can't pass by having missed
+// everything.
+async function nextEvent(predicate, { timeout = 4000, act, never } = {}) {
   const res = await fetch(`${srv.base}/api/events`);
   const reader = res.body.getReader();
-  const deadline = Date.now() + timeout;
+  // act() runs (and, for a synchronous git commit, can block for a bit)
+  // before the deadline is set, so it isn't silently eating the timeout.
   act?.();
+  const deadline = Date.now() + timeout;
   let buf = "";
   try {
     while (Date.now() < deadline) {
@@ -26,9 +32,15 @@ async function nextEvent(predicate, { timeout = 4000, act } = {}) {
       ]);
       if (value?.timedOut || done) break;
       buf += new TextDecoder().decode(value);
-      for (const line of buf.split("\n"))
+      // Only complete (newline-terminated) lines are parseable JSON — a
+      // chunk boundary can split "data: {...}" mid-frame; keep the trailing
+      // (possibly incomplete) segment buffered for the next read.
+      const lines = buf.split("\n");
+      buf = lines.pop();
+      for (const line of lines)
         if (line.startsWith("data: ")) {
           const ev = JSON.parse(line.slice(6));
+          if (never?.(ev)) throw new Error(`unexpected event: ${JSON.stringify(ev)}`);
           if (predicate(ev)) return ev;
         }
     }
@@ -54,6 +66,10 @@ describe("SSE change stream", () => {
     expect(ev.changed).toContain("README.md"); // both in the same 200ms batch
   });
 
+  // Commits all pending worktree edits (src/util.py, docs/guide.md go from
+  // M to clean) — the two tests that follow only look at file paths, not
+  // git status, so this doesn't disturb their assertions; be wary of that
+  // if adding a status-sensitive test after this one.
   test("a commit surfaces as git:true, not as file events", async () => {
     const ev = await nextEvent((e) => e.git === true, {
       act: () => Bun.spawnSync(["git", "commit", "-aqm", "wip"], { cwd: root }),
@@ -62,12 +78,19 @@ describe("SSE change stream", () => {
     expect(ev.changed.some((p) => p.startsWith(".git"))).toBe(false);
   });
 
-  test("changes inside gitignored dirs emit nothing (incident 97ef45d)", async () => {
-    const ev = await nextEvent((e) => e.changed.some((p) => p.startsWith("ignored-dir")), {
+  test("changes inside gitignored dirs emit nothing, while a sibling change still does (incident 97ef45d)", async () => {
+    // Positive control: without a change that's guaranteed to be reported,
+    // this test could pass merely because it waited too little / too much —
+    // it must observe the control's event while never seeing ignored-dir.
+    const ev = await nextEvent((e) => e.changed.includes("control-not-ignored.txt"), {
       timeout: 1200,
-      act: () => writeFileSync(join(root, "ignored-dir/more.txt"), "x\n"),
+      act: () => {
+        writeFileSync(join(root, "ignored-dir/more.txt"), "x\n");
+        writeFileSync(join(root, "control-not-ignored.txt"), "x\n");
+      },
+      never: (e) => e.changed.some((p) => p.startsWith("ignored-dir")),
     });
-    expect(ev).toBeNull();
+    expect(ev).not.toBeNull();
   });
 
   test("idle SSE connections survive past 10 s (incident 3087c19: Bun idleTimeout)", async () => {

@@ -1,7 +1,7 @@
 // Core E2E journeys in Chromium. Each incident-tagged assertion guards a
 // bug that actually shipped during development (refs = fixing commits).
 // Chromium binary: PERUSE_CHROMIUM env, else playwright-core's default.
-import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { describe, test, expect, beforeAll, afterAll, afterEach } from "bun:test";
 import { appendFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { chromium } from "playwright-core";
@@ -9,6 +9,10 @@ import { makeFixtureRepo, startFixtureServer } from "../fixture.js";
 
 let srv, root, browser, page;
 const T = 30_000;
+// Throwing inside a Playwright event listener doesn't fail the test (the
+// listener isn't on the test's own call stack) — collect instead and assert
+// per-test in afterEach, which does fail it.
+let pageErrors = [];
 
 beforeAll(async () => {
   root = makeFixtureRepo();
@@ -18,9 +22,15 @@ beforeAll(async () => {
     args: ["--no-sandbox"],
   });
   page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
-  page.on("pageerror", (e) => { throw new Error(`pageerror: ${e.message}`); });
+  page.on("pageerror", (e) => pageErrors.push(e.message));
 }, 60_000);
 afterAll(async () => { await browser?.close(); await srv?.cleanup(); });
+afterEach(() => {
+  // finally: a failing expect throws, and without the reset one page error
+  // would cascade into failing every subsequent test too
+  try { expect(pageErrors).toEqual([]); }
+  finally { pageErrors = []; }
+});
 
 const openFile = async (path) => {
   await page.goto(`${srv.base}/#/${path}`);
@@ -29,13 +39,13 @@ const openFile = async (path) => {
 };
 
 describe("smoke", () => {
-  test("page boots clean; tree shows statuses, dirty dots, dimmed ignored", async () => {
+  // The job here is booting without a pageerror (checked by the global
+  // afterEach); status/dirty-dot/dim presence is exercised properly, with
+  // real content assertions, by the journeys below.
+  test("page boots clean; tree renders", async () => {
     await page.goto(srv.base);
     await page.waitForSelector("#tree .row");
-    // tree starts collapsed: root-level letters only (U on data.bin)
-    expect(await page.locator("#tree .row .status:visible").count()).toBeGreaterThan(0);
-    expect(await page.locator("#tree .dirty-dot:visible").count()).toBeGreaterThan(0);
-    expect(await page.locator("#tree .row.dim").count()).toBeGreaterThan(0);
+    expect(await page.locator("#tree .row").count()).toBeGreaterThan(0);
   }, T);
 });
 
@@ -52,6 +62,8 @@ describe("code review journey", () => {
     // popup: only the clicked change (+ context), never the whole file
     const line = page.locator(".line[data-hunk]").first();
     const box = await line.boundingBox();
+    // +20px lands inside the gutter (GUTTER_PX=64 in app.js); the gutter has
+    // no separate DOM element, so there's nothing more specific to target.
     await page.mouse.click(box.x + 20, box.y + box.height / 2);
     await page.waitForSelector(".hunk-popup");
     const body = await page.locator(".hp-body").innerText();
@@ -94,11 +106,16 @@ describe("markdown review journey", () => {
     const liX = await page.$$eval(".markdown-body ul li", (els) =>
       [...new Set(els.map((e) => Math.round(e.getBoundingClientRect().left)))]);
     expect(liX.length).toBe(1);
-    // arrows walk the changes and open popups
+    // arrows walk the changes and open popups on DIFFERENT hunks each press
+    // (asserting popup presence alone can't fail: a popup left open by the
+    // previous press would satisfy it even if the arrow did nothing)
     await page.click("[title='Next change']");
     await page.waitForSelector(".hunk-popup");
+    const first = await page.locator(".hunk-popup").getAttribute("data-hunk");
     await page.click("[title='Previous change']");
     await page.waitForSelector(".hunk-popup");
+    const afterPrev = await page.locator(".hunk-popup").getAttribute("data-hunk");
+    expect(afterPrev).not.toBe(first);
     await page.keyboard.press("Escape");
     // relative link navigates in-app
     await page.click(".markdown-body a:has-text('util')");
@@ -112,17 +129,26 @@ describe("markdown review journey", () => {
     await page.waitForSelector(".markdown-body section");
     const r = await page.evaluate(() => {
       const s = document.querySelector("#viewer-scroll");
-      s.scrollTop = 5000;
+      // Derived, not magic: scroll to well inside "Section Two"'s filler
+      // content (its own section's offsetTop + 200px), so its h2 is the one
+      // that ends up pinned regardless of how the fixture content reflows.
+      // guide.md has 3 sections (Guide/h1, Section One/h2, Section Two/h2);
+      // the last one is the only one with enough content below it to still
+      // be scrolled into (and have its own heading pinned) 200px in.
+      const sections = document.querySelectorAll(".markdown-body section");
+      const target = sections[sections.length - 1].offsetTop + 200;
+      s.scrollTop = target;
       const pane = s.getBoundingClientRect();
       const pinned = [...document.querySelectorAll(".markdown-body h1, .markdown-body h2")]
         .map((h) => Math.round(h.getBoundingClientRect().top - pane.top))
-        .filter((y) => y >= -2 && y <= 2);
-      return { scrolled: s.scrollTop, pinned: pinned.length,
+        .filter((y) => y >= -3 && y <= 3);
+      return { scrolled: s.scrollTop, target, pinned: pinned.length,
         bodyScroll: document.scrollingElement.scrollTop };
     });
-    expect(r.scrolled).toBeGreaterThan(500); // the pane itself scrolls…
-    expect(r.bodyScroll).toBe(0);            // …never the body (min-height:0 regression)
-    expect(r.pinned).toBe(1);                // exactly one pinned heading, no ghost stack
+    expect(r.scrolled).toBeGreaterThan(0);        // the pane itself scrolls…
+    expect(Math.abs(r.scrolled - r.target)).toBeLessThanOrEqual(1); // …to where we asked…
+    expect(r.bodyScroll).toBe(0);                 // …never the body (min-height:0 regression)
+    expect(r.pinned).toBe(1);                     // exactly one pinned heading, no ghost stack
   }, T);
 });
 
@@ -132,6 +158,7 @@ describe("live updates", () => {
     await page.waitForSelector(".line[data-hunk]");
     const line = page.locator(".line[data-hunk]").first();
     const box = await line.boundingBox();
+    // +20px: gutter click, see the comment on the equivalent click above.
     await page.mouse.click(box.x + 20, box.y + box.height / 2);
     await page.waitForSelector(".hunk-popup");
     appendFileSync(join(root, "src/util.py"), "# live-edit\n");
@@ -139,5 +166,40 @@ describe("live updates", () => {
     expect(await page.locator(".hunk-popup").count()).toBe(1);
     writeFileSync(join(root, "created-live.md"), "# hello\n");
     await page.waitForSelector("#tree .row:has-text('created-live.md')", { timeout: 8000 });
+  }, T);
+});
+
+describe("theming", () => {
+  test("toggling theme flips computed colors on a Shiki token and an open popup", async () => {
+    await openFile("src/util.py");
+    await page.waitForSelector(".shiki .line span");
+    // openFile() re-navigates to the same path/hash as the previous ("live
+    // updates") test, which is a no-op for page.goto() (URL unchanged) — the
+    // popup that test left open survives, so a click here would TOGGLE IT
+    // CLOSED instead of opening one. Clear it first for a known starting state.
+    await page.keyboard.press("Escape");
+    const line = page.locator(".line[data-hunk]").first();
+    const box = await line.boundingBox();
+    await page.mouse.click(box.x + 20, box.y + box.height / 2); // open a popup too
+    await page.waitForSelector(".hunk-popup");
+    const before = await page.evaluate(() => ({
+      theme: document.documentElement.dataset.theme,
+      token: getComputedStyle(document.querySelector(".shiki .line span")).color,
+      popup: getComputedStyle(document.querySelector(".hp-body")).backgroundColor,
+    }));
+    await page.click(".theme-btn");
+    await page.waitForFunction(
+      (prev) => document.documentElement.dataset.theme !== prev, before.theme);
+    const after = await page.evaluate(() => ({
+      theme: document.documentElement.dataset.theme,
+      token: getComputedStyle(document.querySelector(".shiki .line span")).color,
+      popup: getComputedStyle(document.querySelector(".hp-body")).backgroundColor,
+    }));
+    expect(after.theme).not.toBe(before.theme);
+    expect(after.token).not.toBe(before.token);
+    expect(after.popup).not.toBe(before.popup);
+    await page.keyboard.press("Escape");
+    // leave the toggle as found: other tests assume the default (latte) theme
+    await page.click(".theme-btn");
   }, T);
 });

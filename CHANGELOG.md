@@ -42,7 +42,8 @@ date and becomes the GitHub release notes (see
   hard fd caps, 500-entry per-directory tree cap, automatic client rebuild
   when running from a checkout with stale `dist/`, git subprocesses bounded
   at 30 s with slow-phase logging, SSE connections exempt from Bun's 10 s
-  idle timeout
+  idle timeout; a failed startup (e.g. a pinned port already in use) now
+  closes the watcher and ping timer instead of leaking them
 - Test suite: unit (diff parsing, context arithmetic, path guards, render
   helpers), integration (server + git + SSE contracts over HTTP), and core
   Playwright E2E journeys, with regression tests tagged to past incidents

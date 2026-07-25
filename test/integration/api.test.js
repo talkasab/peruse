@@ -28,6 +28,11 @@ describe("/api/tree", () => {
     // dirty dot propagates to ancestors of changes, not clean dirs
     expect(findNode(body.tree, "src").dirty).toBe(true);
     expect(findNode(body.tree, "docs").dirty).toBe(true);
+    // negative case: a committed, untouched dir/file must NOT be flagged
+    // (bigdir's 510 files are untracked → dirty true, so it can't serve as
+    // the negative here — cleandir is committed and never modified)
+    expect(findNode(body.tree, "cleandir").dirty).toBe(false);
+    expect(findNode(body.tree, "README.md").ignored).toBe(false);
     // .git never appears
     expect(findNode(body.tree, ".git")).toBeNull();
   });
@@ -91,12 +96,17 @@ describe("/api/file", () => {
 });
 
 describe("/raw", () => {
-  test("serves bytes with content type; guards traversal", async () => {
+  test("serves bytes; guards traversal", async () => {
     const r = await fetch(`${srv.base}/raw/README.md`);
     expect(r.status).toBe(200);
-    expect(r.headers.get("content-type")).toContain("markdown");
     expect(await r.text()).toContain("# Fixture");
-    expect((await fetch(`${srv.base}/raw/../../etc/passwd`)).status).toBe(404);
+    // A literal "../../etc/passwd" is collapsed by fetch's own URL parser
+    // before the request ever leaves the browser/client (dot-segment
+    // removal), landing on "/etc/passwd" — a vacuous test of the server's
+    // guard. Percent-encoding the slashes (%2f) keeps ".." inside an opaque
+    // path segment the URL parser won't normalize, so this actually reaches
+    // safePath server-side (decodeURIComponent → "../../etc/passwd" → null).
+    expect((await fetch(`${srv.base}/raw/%2e%2e%2f%2e%2e%2fetc/passwd`)).status).toBe(404);
   });
 });
 

@@ -1,6 +1,12 @@
 // Shared fixture: a throwaway git repo exercising every state peruse
 // renders, including the shapes that caused real incidents (see DEVLOG):
-// separated edits, sockets/symlinks, ignored dirs, oversized dirs.
+// separated edits, symlinks, ignored dirs, oversized dirs.
+// NOTE: no socket/FIFO is included — chokidar's initial scan hangs
+// indefinitely on a directory containing one (reproduced under Bun on
+// Linux: `chokidar.watch()` never fires 'ready'). The `ignored` callback's
+// `!stats.isFile() && !stats.isDirectory()` skip (server/index.js) is
+// exercised only implicitly, if at all, elsewhere; adding a FIFO here to
+// close that gap would hang the whole suite, so it's left uncovered.
 import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -89,6 +95,10 @@ export function makeFixtureRepo() {
   writeFileSync(join(dir, "docs/guide.md"), GUIDE_BASE);
   writeFileSync(join(dir, "README.md"), "# Fixture\n\nSee [the guide](docs/guide.md).\n");
   writeFileSync(join(dir, ".gitignore"), "*.log\nignored-dir/\n");
+  // Committed and never touched afterward: the negative case for `dirty`/
+  // `ignored` flags (a directory/file with real git history but no changes).
+  mkdirSync(join(dir, "cleandir"));
+  writeFileSync(join(dir, "cleandir/kept.txt"), "never modified\n");
   g("add", "-A");
   g("commit", "-qm", "baseline");
 
@@ -127,15 +137,11 @@ export function makePlainDir() {
 export async function startFixtureServer(root, port, opts = {}) {
   // Generous default watch budget: the fixture's 510-file bigdir would eat
   // the fd-derived default and silently mask watcher behaviors under test.
-  // Pass opts.budget to exercise the budget itself.
-  const prev = process.env.PERUSE_WATCH_BUDGET;
-  process.env.PERUSE_WATCH_BUDGET = String(opts.budget ?? 5000);
-  let srv;
-  try { srv = await startServer({ root, port, host: "127.0.0.1", ...opts }); }
-  finally {
-    if (prev === undefined) delete process.env.PERUSE_WATCH_BUDGET;
-    else process.env.PERUSE_WATCH_BUDGET = prev;
-  }
+  // Pass opts.budget to exercise the budget itself — startServer's explicit
+  // watchBudget option takes precedence over the fd-derived default without
+  // touching process.env (which would race if tests ever ran in parallel).
+  const { budget, ...rest } = opts;
+  const srv = await startServer({ root, port, host: "127.0.0.1", watchBudget: budget ?? 5000, ...rest });
   const base = `http://127.0.0.1:${srv.port}`;
   return {
     ...srv, base,

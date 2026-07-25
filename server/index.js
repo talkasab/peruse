@@ -182,7 +182,7 @@ export function safePath(root, rel) {
   return { abs, rel: inside };
 }
 
-export async function startServer({ root, port, host, portFixed = false }) {
+export async function startServer({ root, port, host, portFixed = false, watchBudget }) {
   ensureFreshClient();
   const clients = new Set();
   let pendingChanged = new Set(), pendingGit = false, flushTimer = null;
@@ -233,14 +233,18 @@ export async function startServer({ root, port, host, portFixed = false }) {
   try {
     softFd = Number((await Bun.spawn(["sh", "-c", "ulimit -n"]).stdout.text()).trim()) || 0;
   } catch {}
-  const WATCH_BUDGET = Number(process.env.PERUSE_WATCH_BUDGET)
+  // watchBudget (an explicit startServer option, used by tests) takes
+  // precedence over PERUSE_WATCH_BUDGET, which takes precedence over the
+  // fd-derived default.
+  const WATCH_BUDGET = Number(watchBudget) || Number(process.env.PERUSE_WATCH_BUDGET)
     || (softFd > 0 ? Math.min(5000, Math.floor(softFd / 8)) : 5000);
   // Below ~1024 fds even the watcher's initial scan (concurrent opendir) can
   // starve the process, budget or no budget — verified empirically. The CLI
   // re-execs with a raised limit before we get here, so landing in this branch
   // means the hard limit itself is tiny: run without live updates rather than
-  // hang. PERUSE_WATCH_BUDGET forces watching on for whoever wants to gamble.
-  const watchable = Number(process.env.PERUSE_WATCH_BUDGET) > 0
+  // hang. watchBudget/PERUSE_WATCH_BUDGET force watching on for whoever wants
+  // to gamble.
+  const watchable = Number(watchBudget) > 0 || Number(process.env.PERUSE_WATCH_BUDGET) > 0
     || softFd === 0 || softFd >= 1024;
   // The budget counts every distinct path admitted to the watcher — chokidar
   // holds an fd per watched FILE as well as per directory under Bun, and it
@@ -249,9 +253,15 @@ export async function startServer({ root, port, host, portFixed = false }) {
   const admitted = new Set();
   let budgetWarned = false;
   let watcher = null;
+  // Resolves once the watcher's initial scan completes (chokidar 'ready'), or
+  // immediately when watching is disabled — lets callers (tests) wait for a
+  // real signal instead of guessing a sleep duration.
+  let readyResolve;
+  const ready = new Promise((res) => { readyResolve = res; });
   if (!watchable) {
     console.error(`peruse: fd limit too low (${softFd}) even to scan safely — ` +
       `live updates disabled; raise \`ulimit -n\` (hard limit) to enable them`);
+    readyResolve();
   } else {
     watcher = chokidar.watch(root, {
       ignoreInitial: true,
@@ -276,6 +286,7 @@ export async function startServer({ root, port, host, portFixed = false }) {
         return false;
       },
     });
+    watcher.on("ready", () => readyResolve());
     let watchErrors = 0;
     watcher.on("error", (err) => {
       if (++watchErrors <= 3) console.error(`peruse: watcher: ${err.message ?? err}`);
@@ -366,11 +377,21 @@ export async function startServer({ root, port, host, portFixed = false }) {
   });
 
   let server;
-  for (let p = port; ; p++) {
-    try { server = serve(p); break; }
-    catch (err) {
-      if (portFixed || err?.code !== "EADDRINUSE" || p >= port + 20) throw err;
+  try {
+    for (let p = port; ; p++) {
+      try { server = serve(p); break; }
+      catch (err) {
+        if (portFixed || err?.code !== "EADDRINUSE" || p >= port + 20) throw err;
+      }
     }
+  } catch (err) {
+    // A pinned port that's busy (or any other bind failure) throws before we
+    // return a stop() handle — close what's already running so the watcher
+    // and ping timer don't leak past the failed startServer() call.
+    clearInterval(pingTimer);
+    if (flushTimer) clearTimeout(flushTimer);
+    await watcher?.close();
+    throw err;
   }
   // stop() is for tests and embedders; the CLI just exits.
   const stop = async () => {
@@ -379,7 +400,7 @@ export async function startServer({ root, port, host, portFixed = false }) {
     await watcher?.close();
     server.stop(true);
   };
-  return { port: server.port, host, stop };
+  return { port: server.port, host, stop, ready };
 }
 
 // Dev convenience: `bun run server/index.js [path]` serves without the CLI wrapper.

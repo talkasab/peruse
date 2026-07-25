@@ -7,7 +7,9 @@ describe("safePath (traversal guard)", () => {
   test("accepts normal paths and the root itself", () => {
     expect(safePath(root, "src/a.py")).toEqual({ abs: "/srv/repo/src/a.py", rel: "src/a.py" });
     expect(safePath(root, "")).toEqual({ abs: "/srv/repo", rel: "" });
-    expect(safePath(root, "/leading/slash".slice(1))).not.toBeNull();
+    // un-sliced: exercises the leading-slash strip inside safePath itself
+    // (a pre-sliced literal would pass even if that strip were removed)
+    expect(safePath(root, "/leading/slash")).not.toBeNull();
   });
   test("rejects escapes and .git", () => {
     expect(safePath(root, "../etc/passwd")).toBeNull();
@@ -17,7 +19,9 @@ describe("safePath (traversal guard)", () => {
   });
   test("does not reject look-alike prefixes", () => {
     expect(safePath(root, ".github/ci.yml")).not.toBeNull();
-    expect(safePath("/srv/repo", "../repo2/x")).toBeNull(); // sibling escape
+  });
+  test("rejects sibling-directory escapes (root + '/' prefix check, not just startsWith(root))", () => {
+    expect(safePath("/srv/repo", "../repo2/x")).toBeNull();
   });
 });
 

@@ -28,6 +28,25 @@ describe("parseHunks", () => {
     expect(parseHunks("")).toEqual([]);
     expect(parseHunks("fatal: not a repository")).toEqual([]);
   });
+
+  // Every caller (fileHunks) diffs exactly one file (`git diff -- rel`), so
+  // this has never mattered in practice — but it means parseHunks itself is
+  // NOT multi-file-safe: a second file's "---"/"+++" headers start with a
+  // character the continuation regex accepts, so they get appended onto the
+  // PRIOR file's last hunk instead of starting fresh. Documented here rather
+  // than fixed, since nothing exercises multi-file input today.
+  test("characterization: a second file's headers bleed into the prior hunk (multi-file diffs unsupported)", () => {
+    const diff = [
+      "diff --git a/f1 b/f1", "--- a/f1", "+++ b/f1",
+      "@@ -1 +1 @@", "-old", "+new",
+      "diff --git a/f2 b/f2", "--- a/f2", "+++ b/f2",
+      "@@ -5 +5 @@", "-old2", "+new2",
+    ].join("\n");
+    const h = parseHunks(diff);
+    expect(h).toHaveLength(2);
+    expect(h[0].patch).toContain("--- a/f2");
+    expect(h[0].patch).toContain("+++ b/f2");
+  });
 });
 
 describe("withContext", () => {

@@ -88,9 +88,14 @@ Robustness (each learned from a real failure):
 - Watch budget: at most ⅛ of the real fd limit in distinct admitted paths
   (chokidar holds fds per watched *file* under Bun and doesn't reliably
   pass `stats` to the ignore callback — admission is by first sight).
-  `PERUSE_WATCH_BUDGET` overrides.
+  `PERUSE_WATCH_BUDGET` overrides; `startServer`'s `watchBudget` option (used
+  by tests) takes precedence over both.
 - Below ~1024 fds even the initial scan can starve the process: watching
   is disabled entirely with a clear message instead.
+- `startServer` returns a `ready` promise (resolves on chokidar's initial
+  scan, or immediately if watching is disabled) and closes the watcher and
+  ping timer if startup fails (e.g. a pinned `--port` already in use) rather
+  than leaking them.
 
 ## Client (`web/`)
 
@@ -155,20 +160,25 @@ flip restyles everything.
 Three tiers, all run by `bun test` (no test framework dependency;
 `playwright-core` for E2E). Shared fixture: `test/fixture.js` builds a
 throwaway git repo covering every state peruse renders — including the
-shapes behind past incidents (separated edits, sockets/symlinks, ignored
-dirs, oversized dirs). Regression assertions are tagged with the commit
-that fixed the incident they guard.
+shapes behind past incidents (separated edits, symlinks, ignored dirs,
+oversized dirs). No socket/FIFO is included: chokidar's initial scan hangs
+indefinitely on one (reproduced under Bun on Linux; issue #20), so that
+corner of the watcher's `ignored` skip is untested rather than risk hanging
+the suite.
+Regression assertions are tagged with the commit that fixed the incident
+they guard.
 
 - `bun test` → **unit** (`test/unit/`: parseHunks, withContext, safePath,
-  buildTree, web/lib.js helpers) + **integration** (`test/integration/`:
-  real server + real git over HTTP — tree/file/raw contracts, SSE
-  coalescing and gitignore-skip, idle-connection survival, port fallback,
-  tiny-watch-budget survival, non-git degradation).
-- `bun run test:e2e` → **core E2E** (`test/e2e/`): four Chromium journeys —
+  buildTree, gitStatus porcelain-v2 parsing, web/lib.js helpers) +
+  **integration** (`test/integration/`: real server + real git over HTTP —
+  tree/file/raw contracts, SSE coalescing and gitignore-skip,
+  idle-connection survival, port fallback, tiny-watch-budget survival,
+  non-git degradation).
+- `bun run test:e2e` → **core E2E** (`test/e2e/`): five Chromium journeys —
   smoke, code review (exact marks, popup scope), markdown review (rail
   single-x measurement, innermost marks, arrows, links, pinned headers,
-  no body scroll), live updates. Chromium binary via `PERUSE_CHROMIUM` or
-  playwright's registry.
+  no body scroll), live updates, theming (Latte/Mocha token + popup color
+  flip). Chromium binary via `PERUSE_CHROMIUM` or playwright's registry.
 
 No CI is wired up; the suite runs locally (`bun test`, `bun run test:e2e`).
 CI automation is tracked in issue #1.

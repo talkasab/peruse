@@ -43,6 +43,10 @@ describe("language resolution", () => {
   test("unknown falls back to text", () => {
     expect(langForPath("weird.xyz", loaded)).toBe("text");
     expect(resolveLang("", loaded)).toBe("text");
+    // a grammar id with no LANG alias and absent from `loaded` — the
+    // `loaded` set argument is otherwise never exercised by these tests
+    expect(resolveLang("rust", loaded)).toBe("text");
+    expect(resolveLang("go", loaded)).toBe("go"); // true branch: loaded contents matter
   });
 });
 
