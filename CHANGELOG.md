@@ -45,7 +45,6 @@ date and becomes the GitHub release notes (see
   idle timeout
 - Test suite: unit (diff parsing, context arithmetic, path guards, render
   helpers), integration (server + git + SSE contracts over HTTP), and core
-  Playwright E2E journeys, with regression tests tagged to past incidents;
-  runs in GitHub Actions on every push/PR
+  Playwright E2E journeys, with regression tests tagged to past incidents
 
 [Unreleased]: https://github.com/talkasab/peruse/commits/main

@@ -170,7 +170,8 @@ that fixed the incident they guard.
   no body scroll), live updates. Chromium binary via `PERUSE_CHROMIUM` or
   playwright's registry.
 
-CI (`.github/workflows/ci.yml`) runs all tiers on every push/PR.
+No CI is wired up; the suite runs locally (`bun test`, `bun run test:e2e`).
+CI automation is tracked in issue #1.
 
 Known watcher limitation: a directory containing a dangling symlink is
 silently unwatched by chokidar (issue #17); tree/file serving is
