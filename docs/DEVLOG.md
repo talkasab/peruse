@@ -12,7 +12,9 @@ this is the engineering story.)
   README caveat, characterized by three integration tests (in-root link
   serves, out-of-root link serves, symlink entries absent from the tree),
   and opt-in confinement for `--host 0.0.0.0` is filed as issue #21.
-  The `.git` case-sensitivity finding remains undecided.
+- Owner ruling on the `.git` case-sensitivity finding: **won't fix** (the
+  finding applies only to case-insensitive volumes and was code-reading
+  inference, never demonstrated live).
 
 ## 2026-07-25 — Review-driven test hardening (58 tests)
 
