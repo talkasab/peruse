@@ -110,6 +110,36 @@ describe("/raw", () => {
   });
 });
 
+describe("symlink policy (characterization — owner decision 2026-07-25)", () => {
+  // Decision: peruse FOLLOWS symlinks, including ones that lead outside the
+  // served root. Rationale: read-only viewer of directories the user chose
+  // to serve; out-of-tree symlinks are common and legitimate. The exposure
+  // this creates in the auth-free --host 0.0.0.0 mode is documented in the
+  // README caveat; opt-in confinement for network mode is issue #21.
+  test("the system works with symlinks: in-root links serve their target", async () => {
+    const f = (await srv.json("/api/file?path=linkfarm/readme-link")).body;
+    expect(f.content).toContain("# Fixture");
+    const raw = await fetch(`${srv.base}/raw/linkfarm/readme-link`);
+    expect(raw.status).toBe(200);
+    expect(await raw.text()).toContain("# Fixture");
+  });
+
+  test("links out of the root are followed too (accepted, documented)", async () => {
+    const raw = await fetch(`${srv.base}/raw/escape-link`);
+    expect(raw.status).toBe(200);
+    expect(await raw.text()).toContain("OUTSIDE THE ROOT");
+    const f = (await srv.json("/api/file?path=escape-link")).body;
+    expect(f.content).toContain("OUTSIDE THE ROOT");
+  });
+
+  test("symlink entries are not listed in the tree (dirents aren't files/dirs)", async () => {
+    const { body } = await srv.json("/api/tree");
+    const lf = findNode(body.tree, "linkfarm");
+    expect(lf.children).toEqual([]); // readme-link + dangling both omitted
+    expect(findNode(body.tree, "escape-link")).toBeNull();
+  });
+});
+
 describe("non-git directory degrades gracefully", () => {
   test("serves tree and files with no git decoration", async () => {
     const { body } = await plain.json("/api/tree");

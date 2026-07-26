@@ -53,8 +53,11 @@ local network entirely; alternatively keep the localhost default and front
 it with `tailscale serve 7440`.
 
 **Caveat:** peruse has no authentication — anyone who can reach the port can
-read the entire served directory. Only expose directories you'd share with
-everyone on that network.
+read the entire served directory. Symlinks are followed, **including ones
+that point outside the served directory** — so what's reachable is the
+directory *plus everything it links to*. Only expose directories you'd share
+with everyone on that network. (Opt-in symlink confinement for network mode
+is tracked in issue #21.)
 
 ## Design at a glance
 

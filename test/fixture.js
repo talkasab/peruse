@@ -119,6 +119,13 @@ export function makeFixtureRepo() {
   symlinkSync("/nonexistent-target", join(dir, "linkfarm/dangling"));
   symlinkSync(join(dir, "README.md"), join(dir, "linkfarm/readme-link"));
 
+  // Symlink pointing OUTSIDE the served root (sibling dir, cleaned up with
+  // the fixture): peruse deliberately follows it — owner-accepted policy,
+  // characterized in api.test.js.
+  mkdirSync(`${dir}-outside`);
+  writeFileSync(join(`${dir}-outside`, "secret.txt"), "OUTSIDE THE ROOT\n");
+  symlinkSync(join(`${dir}-outside`, "secret.txt"), join(dir, "escape-link"));
+
   // incident 97ef45d/dd900e4: an oversized directory (cap at 500 entries)
   mkdirSync(join(dir, "bigdir"));
   for (let i = 0; i < 510; i++)
@@ -149,6 +156,10 @@ export async function startFixtureServer(root, port, opts = {}) {
       const r = await fetch(base + path);
       return { status: r.status, body: r.status === 200 ? await r.json() : null };
     },
-    cleanup: async () => { await srv.stop(); rmSync(root, { recursive: true, force: true }); },
+    cleanup: async () => {
+      await srv.stop();
+      rmSync(root, { recursive: true, force: true });
+      rmSync(`${root}-outside`, { recursive: true, force: true });
+    },
   };
 }

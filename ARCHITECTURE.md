@@ -41,6 +41,11 @@ Alpine.js, @catppuccin/palette) are devDependencies bundled into `dist/`.
 All rendering is client-side; the server serves files, answers git
 questions, and pushes change events. Every request path is resolved under
 the served root (traversal guard); `.git/` is never listed or served.
+Symlinks are followed for file access — deliberately including links whose
+target lies outside the served root (owner decision 2026-07-25;
+characterized in the integration suite; network-mode confinement is issue
+#21). Symlink entries do not appear in the tree (dirents are neither file
+nor directory), but direct paths through them serve normally.
 
 | Endpoint | Returns |
 |---|---|

@@ -4,6 +4,16 @@ Narrative record of work sessions — what changed, what we learned, and why.
 Newest first. (The [CHANGELOG](../CHANGELOG.md) is the user-facing summary;
 this is the engineering story.)
 
+## 2026-07-25 (later) — Symlink policy decided
+
+- Owner ruling on the review's symlink-escape finding: **follow symlinks,
+  including out of the served root** — appropriate for a personal
+  read-only viewer; the network-mode exposure is now documented in the
+  README caveat, characterized by three integration tests (in-root link
+  serves, out-of-root link serves, symlink entries absent from the tree),
+  and opt-in confinement for `--host 0.0.0.0` is filed as issue #21.
+  The `.git` case-sensitivity finding remains undecided.
+
 ## 2026-07-25 — Review-driven test hardening (58 tests)
 
 An independent review of the suite (commit 42b78c6) found 7/10 injected
