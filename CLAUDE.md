@@ -46,5 +46,6 @@ implemented** and is the source of truth.
 ## Publishing
 
 npm name `peruse` is squatted → publish as `@talkasab/peruse`, bin `peruse`.
-Standalone binaries via `bun build --compile` attached to GitHub releases.
-Release steps: docs/RELEASING.md.
+Distribution is npm only — `bunx @talkasab/peruse` needs no install. Compiled
+standalone binaries were considered and dropped (YAGNI: 61 MB per platform to
+serve users who already have Bun). Release steps: docs/RELEASING.md.

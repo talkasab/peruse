@@ -4,6 +4,64 @@ Narrative record of work sessions — what changed, what we learned, and why.
 Newest first. (The [CHANGELOG](../CHANGELOG.md) is the user-facing summary;
 this is the engineering story.)
 
+## 2026-07-29 — v1 on main, `dev` opened, adversarial review triaged
+
+- **Branching**: the 32-commit `claude/design-doc-clarification-x5d8ia`
+  branch (all of v1, the test suite, every hardening pass) fast-forwarded
+  onto `main` and the branch retired; `dev` opened from `main` as the
+  integration branch, feature work branches from there. Note this makes
+  #15's "base branch = `dev` if it exists, else `main`" rule resolve to
+  `dev` the moment that issue is implemented. Suite verified green before
+  landing (54 unit+integration, 7 E2E).
+- **`PERUSE_CHROMIUM` is effectively required on this machine**: the repo's
+  `playwright-core` pins Chromium build 1228 and the local cache holds
+  1229/1232, so a bare `bun run test:e2e` prints Playwright's "just
+  installed, run `npx playwright install`" banner even though six usable
+  builds are already present. Point the env var at a cached build instead
+  of downloading.
+- **An independent adversarial review was triaged finding by finding.**
+  The single most useful thing learned: *the review was run against a stale
+  checkout* — it asserted "`bun test` reports no tests found" and that
+  package.json had no test scripts, both false since 42b78c6. Its line
+  references sat ~10 lines off current files. Every remaining finding was
+  therefore re-verified at HEAD rather than accepted or dismissed wholesale.
+  It also re-raised the symlink escape as an open P1, unaware of the
+  2026-07-25 ruling.
+- **Confirmed at HEAD** (943ab48): Markdown `html: true` + `innerHTML`
+  executes inline handlers — demonstrated end to end in Chromium, where a
+  README's `onerror` read a *different* file through `/api/file` and had
+  its contents ready to send anywhere; no `Host` validation (`Host:
+  evil.example.com` → 200); deleted files parsed correctly by `gitStatus`
+  then dropped by `buildTree`; one-change-per-block Markdown mapping; `git
+  status` without `--no-optional-locks`; `/raw/%ZZ` serving Bun's debug
+  page; `decodeURIComponent` throwing on a literal `%` in a filename.
+- **Owner ruling — Markdown sanitization (#23)**: fix it, but removing HTML
+  support is not an acceptable fix. Sanitizing costs nothing real (GitHub
+  has always allowlist-sanitized Markdown HTML; `<details>`, sized images,
+  `<picture>` dark-mode sources and badges all survive). peruse-specific
+  wrinkle recorded there: Alpine directives (`x-*`, `@*`, `:*`) must also
+  be stripped, since Alpine mutation-observes the DOM and generic
+  sanitizers won't know to remove them.
+- **Owner ruling — compiled binaries dropped with prejudice** as a YAGNI
+  violation. Measured 61 MB per binary (Bun embeds its runtime), so five
+  platforms ≈ 300 MB of assets per release, aimed at an audience that
+  already has Bun. `bunx @talkasab/peruse` needs no install. Struck from
+  CLAUDE.md, README, and RELEASING.md; #2 rescoped to npm-only. The latent
+  defect went with it: compiled binaries never embedded the client, so `/`
+  returned `500 no built client found` while the API worked fine.
+- **Provenance lesson.** That five-platform spec was never a product
+  decision — an agent elaborated it from a research document into
+  RELEASING.md and issue #2, where it acquired the authority of written
+  scope. This is the second instance of the pattern after the CI workflow
+  removed on 07-25 for shipping unauthorized. Repo-documented scope is not
+  automatically an owner decision; check `git log --diff-filter=A` and
+  issue creation timestamps before treating it as one (#1–#12 were filed
+  programmatically in 51 seconds).
+- Issue housekeeping: #11 rewritten (its premise — that deleted files
+  appear with a placeholder — was false; they are absent entirely), #24
+  filed for the Markdown multi-change collapse, #14 closed as fixed by
+  1bb8cb2, #23 filed, #2 rescoped.
+
 ## 2026-07-25 (later) — Symlink policy decided
 
 - Owner ruling on the review's symlink-escape finding: **follow symlinks,

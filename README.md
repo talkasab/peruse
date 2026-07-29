@@ -27,8 +27,6 @@ cd some/directory
 bunx @talkasab/peruse        # → http://127.0.0.1:7440
 ```
 
-Or grab a standalone binary from Releases (no Bun required).
-
 ```
 peruse [path] [--port 7440] [--host 127.0.0.1] [--no-open]
 ```

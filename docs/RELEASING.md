@@ -14,10 +14,13 @@ To cut a release:
 4. The tag triggers the release workflow (issue #2, once built):
    - `npm publish` via OIDC trusted publishing (no tokens; provenance
      automatic)
-   - `bun build --compile` binaries for
-     linux-x64 / linux-arm64 / darwin-x64 / darwin-arm64 / windows-x64
    - GitHub Release created with the notes extracted from this version's
-     CHANGELOG section, binaries attached.
+     CHANGELOG section.
+
+Distribution is npm only. Compiled standalone binaries were considered and
+dropped as a YAGNI violation: at 61 MB each (Bun embeds its runtime), five
+platforms would add ~300 MB of assets per release to serve an audience that
+already has Bun or Node — `bunx @talkasab/peruse` needs no install at all.
 
 Until #2 lands, steps 4's pieces are run by hand (`npm publish` from a
 Node ≥ 24 environment; `bun run build` first is handled by
