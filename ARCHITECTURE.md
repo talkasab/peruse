@@ -21,7 +21,8 @@ dist/                 prebuilt client (bun build; auto-rebuilt when stale)
 
 One external runtime dependency: **chokidar** (Bun's native watcher drops
 events). Client libraries (markdown-it + plugins, Shiki, diff2html,
-Alpine.js, @catppuccin/palette) are devDependencies bundled into `dist/`.
+DOMPurify, Alpine.js, @catppuccin/palette) are devDependencies bundled into
+`dist/`.
 
 ## CLI (`bin/peruse.js`)
 
@@ -121,6 +122,11 @@ rows (depth-annotated), selection via `location.hash` (`#/path`), theme in
   key/value card; stripped lines are replaced with blanks so `data-lines`
   stays true to file lines. Relative links open in-app (tree follows);
   relative images rewrite to `/raw/`; external links get `target=_blank`.
+  Rendered HTML passes through DOMPurify before DOM insertion; raw HTML
+  remains supported, while active content and Alpine directives (`x-*`,
+  `@*`, `:*`) are removed. The sanitizer preserves common README HTML,
+  task-list inputs, fragment IDs/links, and Shiki's classes and inline
+  dual-theme styles.
   Each h1/h2 + content is wrapped in a `<section>` at render time so
   headings pin to the pane top while their section scrolls and are pushed
   off by the next (no sticky stacking).
@@ -153,6 +159,10 @@ rows (depth-annotated), selection via `location.hash` (`#/path`), theme in
 - **Binary/images**: images render via `/raw/`; other binaries show a
   metadata card with a download link.
 
+All file-derived rich HTML insertion paths are sanitized: rendered Markdown
+(including highlighted fences), highlighted code, and diff2html popup output.
+Static image/file cards continue to encode URL paths and escape displayed text.
+
 ## Theming
 
 `@catppuccin/palette` CSS variables; semantic vars mapped per
@@ -162,8 +172,8 @@ flip restyles everything.
 
 ## Testing
 
-Three tiers, all run by `bun test` (no test framework dependency;
-`playwright-core` for E2E). Shared fixture: `test/fixture.js` builds a
+Three tiers (no test framework dependency; `playwright-core` for E2E). The
+core browser journeys share a fixture from `test/fixture.js`, which builds a
 throwaway git repo covering every state peruse renders — including the
 shapes behind past incidents (separated edits, symlinks, ignored dirs,
 oversized dirs). No socket/FIFO is included: chokidar's initial scan hangs
@@ -173,17 +183,26 @@ the suite.
 Regression assertions are tagged with the commit that fixed the incident
 they guard.
 
-- `bun test` → **unit** (`test/unit/`: parseHunks, withContext, safePath,
-  buildTree, gitStatus porcelain-v2 parsing, web/lib.js helpers) +
+- `bun run test` → **unit** (`test/unit/`: parseHunks, withContext, safePath,
+  buildTree, gitStatus porcelain-v2 parsing, web/lib.js helpers, rendered HTML
+  sanitization and compatibility) +
   **integration** (`test/integration/`: real server + real git over HTTP —
   tree/file/raw contracts, SSE coalescing and gitignore-skip,
   idle-connection survival, port fallback, tiny-watch-budget survival,
   non-git degradation).
-- `bun run test:e2e` → **core E2E** (`test/e2e/`): five Chromium journeys —
+- `bun run test:e2e` → **E2E** (`test/e2e/`): five core Chromium journeys —
   smoke, code review (exact marks, popup scope), markdown review (rail
   single-x measurement, innermost marks, arrows, links, pinned headers,
   no body scroll), live updates, theming (Latte/Mocha token + popup color
-  flip). Chromium binary via `PERUSE_CHROMIUM` or playwright's registry.
+  flip) — plus a self-contained Markdown sanitization regression with its own
+  fixture, server, and fresh page. The security journey verifies both inert
+  hostile HTML and preserved README/task-list/Shiki rendering in the live DOM.
+  Chromium binary via `PERUSE_CHROMIUM` or playwright's registry.
+
+The core journeys currently share one page; hash-only navigation can race the
+application's `hashchange` update and leak state between journeys. Harness
+isolation and synchronization are tracked in issue #26. The sanitization
+regression deliberately does not use that shared-page pattern.
 
 No CI is wired up; the suite runs locally (`bun test`, `bun run test:e2e`).
 CI automation is tracked in issue #1.

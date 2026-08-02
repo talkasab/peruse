@@ -43,10 +43,12 @@ import langYaml from "@shikijs/langs/yaml";
 
 import { esc, resolveLang as libResolveLang, langForPath as libLangForPath,
   resolveRel, fmtSize, hunkRange, splitFrontmatter } from "./lib.js";
+import { createHTMLSanitizer } from "./sanitize.js";
 
 const GUTTER_PX = 64;
 const MAX_HL_SIZE = 1_000_000, MAX_HL_LINES = 10_000;
 const IMG_EXTS = new Set(["png", "jpg", "jpeg", "gif", "webp", "ico", "avif", "bmp"]);
+const sanitizeHTML = createHTMLSanitizer(window);
 
 const highlighter = await createHighlighterCore({
   themes: [latte, mocha],
@@ -106,12 +108,12 @@ function buildPanel(file, i, mode) {
   el.className = "hunk-popup";
   el.dataset.hunk = i;
   el.dataset.mode = mode;
-  el.innerHTML =
+  el.innerHTML = sanitizeHTML(
     `<div class="hp-bar"><span class="hp-kind hp-${h.kind}">${h.kind}</span>` +
     `<span class="hp-loc">line ${Math.max(1, h.newStart)}</span><span class="spacer"></span>` +
     `<button class="hp-view">${mode === "unified" ? "split" : "unified"}</button>` +
     `<button class="hp-close" title="Close (Esc)">✕</button></div>` +
-    `<div class="hp-body">${renderDiff(file.path, h, mode)}</div>`;
+    `<div class="hp-body">${renderDiff(file.path, h, mode)}</div>`);
   return el;
 }
 
@@ -252,7 +254,8 @@ Alpine.data("peruse", () => ({
       fmCard = `<table class="fm-card">${rows}</table>`;
       body = fm.body;
     }
-    v.innerHTML = `<article class="markdown-body">${fmCard}${md.render(body)}</article>`;
+    v.innerHTML = sanitizeHTML(
+      `<article class="markdown-body">${fmCard}${md.render(body)}</article>`);
     // Wrap each h1/h2 section in a <section> so a pinned heading is sticky
     // only within its own section — the next section pushes it away instead
     // of stacking on top of it (mismatched heights would ghost through).
@@ -326,8 +329,9 @@ Alpine.data("peruse", () => ({
   renderCode(v, f) {
     const big = f.size > MAX_HL_SIZE || f.content.split("\n").length > MAX_HL_LINES;
     const lang = this.isMarkdown ? "markdown" : langForPath(f.path);
-    v.innerHTML = (big ? `<div class="notice">Large file — syntax highlighting disabled</div>` : "")
-      + (big ? plainPre(f.content) : hlCode(f.content, lang));
+    v.innerHTML = sanitizeHTML(
+      (big ? `<div class="notice">Large file — syntax highlighting disabled</div>` : "")
+      + (big ? plainPre(f.content) : hlCode(f.content, lang)));
     const lines = v.querySelectorAll(".line");
     if (f.status === "U" || f.status === "A") return; // wholly-new file: no gutter marks
     f.hunks.forEach((h, i) => {
@@ -367,8 +371,8 @@ Alpine.data("peruse", () => ({
     const mode = panel.dataset.mode === "unified" ? "split" : "unified";
     panel.dataset.mode = mode;
     panel.querySelector(".hp-view").textContent = mode === "unified" ? "split" : "unified";
-    panel.querySelector(".hp-body").innerHTML =
-      renderDiff(this.file.path, this.file.hunks[+panel.dataset.hunk], mode);
+    panel.querySelector(".hp-body").innerHTML = sanitizeHTML(
+      renderDiff(this.file.path, this.file.hunks[+panel.dataset.hunk], mode));
   },
   closeAllPanels() {
     for (const p of this.$refs.viewer.querySelectorAll(".hunk-popup")) p.remove();

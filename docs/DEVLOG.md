@@ -4,6 +4,46 @@ Narrative record of work sessions — what changed, what we learned, and why.
 Newest first. (The [CHANGELOG](../CHANGELOG.md) is the user-facing summary;
 this is the engineering story.)
 
+## 2026-08-02 — Rendered Markdown sanitization (#23)
+
+- Added DOMPurify at every file-derived rich HTML insertion boundary:
+  markdown-it output (including raw HTML and highlighted fences), Shiki code
+  output, and diff2html popup bodies. The remaining `innerHTML` uses either
+  clear content or construct static cards whose displayed text is escaped and
+  whose file paths are URL-encoded.
+- The default DOMPurify HTML policy already preserves the README vocabulary we
+  need: details/summary, keyboard/subscript/superscript markup, sized and
+  aligned images, badges, picture/source variants, named anchors, HTML tables,
+  disabled task-list checkboxes, heading and footnote IDs/fragment links, and
+  Shiki classes/inline dual-theme styles. The only peruse-specific policy is a
+  sanitizer hook removing Alpine directives (`x-*`, `@*`, and `:*`), because
+  Alpine mutation-observes inserted DOM and could otherwise evaluate them.
+- Tests render hostile Markdown containing image and SVG handlers, scripts,
+  blocked embed elements, active URLs, and Alpine directives, then inspect the
+  sanitized DOM. A positive fixture uses the real markdown-it plugins and the
+  real Shiki dual-theme highlighter and must survive sanitization unchanged.
+  The test also confirms markdown-it itself still rejects `javascript:` link
+  destinations before sanitization.
+- Added a self-contained Chromium regression using a private temp fixture,
+  server, browser page, and real initial navigation. It proves the image handler
+  and Alpine directive do not execute, `/raw/secret.env` is not captured, live
+  active attributes are absent, and details/summary, kbd/sub/sup, tables,
+  disabled task inputs, and Shiki-styled tokens all remain. Temporarily bypassing
+  only Markdown sanitization made this test fail immediately on the executed
+  image handler; restoring the backed-up source byte-for-byte made it pass.
+- Chromium was available through the established `PERUSE_CHROMIUM` path even
+  though Playwright's registry fallback did not find its expected executable.
+  A CSP remains deliberately unshipped: a candidate would still require
+  `unsafe-eval` for Alpine, inline styles for Shiki, external image allowances
+  for badges, and same-origin connections for SSE, and this test-only follow-up
+  did not expand #23 into an HTTP policy change.
+- The existing core E2E harness shares one page across journeys and races
+  hash-only navigation against Alpine state updates. The identical 2-pass /
+  5-fail result on the untouched `dev` baseline and a clean five-navigation
+  browser probe separate that harness behavior from #23 and from browser
+  crashes. Filed #26 with the observed first timeout and isolation/synchronizing
+  directions; no harness behavior was changed here.
+
 ## 2026-07-29 — v1 on main, `dev` opened, adversarial review triaged
 
 - **Branching**: the 32-commit `claude/design-doc-clarification-x5d8ia`
