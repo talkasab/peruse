@@ -121,6 +121,7 @@ Alpine.data("peruse", () => ({
   tree: [], isRepo: false, root: "",
   open: new Set(), changedOnly: false, showIgnored: true,
   file: null, raw: false, theme: "latte", loading: false, loadingName: "",
+  nav: 0, wanted: null,
 
   async init() {
     this.theme = localStorage.getItem("peruse-theme")
@@ -198,22 +199,34 @@ Alpine.data("peruse", () => ({
     // indicator and yield two frames so it actually PAINTS first (its spinner
     // is transform-animated, so the compositor keeps it moving during the
     // block). Silent-refresh SSE re-renders only indicate when the file is big.
+    // Every await below lets another selection start mid-flight. A real
+    // navigation records the path it is heading for; a newer one supersedes
+    // it. An SSE silent refresh always carries the CURRENTLY loaded path, so
+    // when it lands during a navigation it is refreshing a file the user has
+    // already left — it must drop out rather than re-render the old file and
+    // write that path back to location.hash, undoing the navigation.
+    const nav = preserve ? this.nav : ++this.nav;
+    if (!preserve) this.wanted = path;
+    const superseded = () => nav !== this.nav || (preserve && this.wanted !== path);
     this.loadingName = path.split("/").pop();
     if (!preserve) this.loading = true;
     const r = await fetch(`/api/file?path=${encodeURIComponent(path)}`);
+    if (superseded()) return;
     if (!r.ok) { this.file = null; this.loading = false; this.$refs.viewer.innerHTML = ""; return; }
     const data = await r.json();
+    if (superseded()) return;
     if (preserve && (data.content?.length ?? 0) > 300_000) this.loading = true;
     if (this.loading) {
       await new Promise(requestAnimationFrame);
       await new Promise(requestAnimationFrame);
+      if (superseded()) return;
     }
     const scroll = preserve ? this.$refs.scroll.scrollTop : 0;
     const panels = preserve ? this.panelState() : [];
     this.file = data;
     if (!preserve) this.raw = false;
     this.expandTo(path);
-    if (location.hash !== `#/${path}`) location.hash = `#/${path}`;
+    if (!preserve && location.hash !== `#/${path}`) location.hash = `#/${path}`;
     this.render();
     this.loading = false;
     this.$refs.scroll.scrollTop = scroll;

@@ -4,6 +4,33 @@ Narrative record of work sessions — what changed, what we learned, and why.
 Newest first. (The [CHANGELOG](../CHANGELOG.md) is the user-facing summary;
 this is the engineering story.)
 
+## 2026-08-02 — A "flaky test" that was an application race (#26)
+
+- The E2E suite sat at 2 pass / 5 fail. It failed identically on the untouched
+  `dev` baseline, so it was filed as pre-existing harness flakiness caused by
+  the shared page and hash-only navigation. That diagnosis was wrong.
+- Running the journeys individually was what broke it open: six of seven passed
+  alone, and the seventh (markdown review) failed only intermittently — 2 of 3
+  isolated runs, then 2 of 8 in a tight loop. A single comparison run had made
+  it look like our own change had caused it; repetition showed otherwise.
+- Instrumenting the page found the click always reached the handler, and the
+  failures correlated with 3-5 re-renders arriving right after it. The cause:
+  `selectFile` awaits a fetch and two frames before writing `location.hash`.
+  An SSE silent refresh carries the path loaded when it fired, so one landing
+  during a navigation re-rendered the file the user had just left and wrote
+  that path back to the hash. The click was not lost; it was undone.
+- Fix: a real navigation records `wanted` and takes a `nav` token; a silent
+  refresh drops out if `wanted` has moved on, and never writes `location.hash`.
+  A first attempt guarded only against *stale* calls and did nothing, because
+  the refresh is the *newer* call — the guard had to be asymmetric.
+- Result: 0/8 in the loop that reproduced it, then seven consecutive clean
+  suite runs (9 pass). `navigation.test.js` drives the race deterministically
+  via `Alpine.$data` and fails without the fix.
+- Lesson: "fails the same on baseline" proves it is not a regression; it does
+  not prove the tests are at fault. Also, the first version of the new test
+  reused the heavy shared fixture and destabilized the suite through resource
+  contention — self-contained means lightweight too.
+
 ## 2026-08-02 — Rendered Markdown sanitization (#23)
 
 - Added DOMPurify at every file-derived rich HTML insertion boundary:

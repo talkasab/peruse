@@ -12,6 +12,8 @@ date and becomes the GitHub release notes (see
 ## [Unreleased]
 
 ### Fixed
+- Opening a file no longer snaps back to the previous file when a live update
+  arrives at the same moment (#26)
 - Rendered Markdown now removes executable HTML and Alpine directives while
   preserving supported README HTML, task lists, anchors, and highlighted code
   (#23)

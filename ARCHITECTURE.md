@@ -156,6 +156,12 @@ rows (depth-annotated), selection via `location.hash` (`#/path`), theme in
   viewport at any scroll depth; its spinner is transform-animated so the
   compositor keeps it moving while Shiki blocks the main thread. Shown for
   silent refreshes only >300 KB.
+- **Navigation vs. live refresh**: `selectFile` awaits a fetch and up to two
+  frames, so selections overlap. A real navigation records the path it is
+  heading for (`wanted`) and takes a token (`nav`); an SSE silent refresh
+  carries whatever path was loaded when it fired, so if the user has since
+  navigated away it drops out instead of re-rendering the old file and writing
+  that path back to `location.hash` (issue #26).
 - **Binary/images**: images render via `/raw/`; other binaries show a
   metadata card with a download link.
 
@@ -194,15 +200,18 @@ they guard.
   smoke, code review (exact marks, popup scope), markdown review (rail
   single-x measurement, innermost marks, arrows, links, pinned headers,
   no body scroll), live updates, theming (Latte/Mocha token + popup color
-  flip) — plus a self-contained Markdown sanitization regression with its own
-  fixture, server, and fresh page. The security journey verifies both inert
-  hostile HTML and preserved README/task-list/Shiki rendering in the live DOM.
+  flip) — plus two self-contained regressions, each with its own fixture,
+  server, and fresh page: Markdown sanitization (inert hostile HTML alongside
+  preserved README/task-list/Shiki rendering in the live DOM) and navigation
+  (a silent refresh must not undo an in-flight navigation).
   Chromium binary via `PERUSE_CHROMIUM` or playwright's registry.
 
-The core journeys currently share one page; hash-only navigation can race the
-application's `hashchange` update and leak state between journeys. Harness
-isolation and synchronization are tracked in issue #26. The sanitization
-regression deliberately does not use that shared-page pattern.
+The core journeys share one page. That pattern surfaced issue #26, which looked
+like harness flakiness but was an application race: an SSE silent refresh
+landing mid-navigation reverted `location.hash`, undoing a link click in about
+a quarter of runs. The fix is in `selectFile` (see Navigation vs. live refresh
+above); `navigation.test.js` drives the race deterministically. The sanitization
+and navigation regressions each use their own fixture, server, and page.
 
 No CI is wired up; the suite runs locally (`bun test`, `bun run test:e2e`).
 CI automation is tracked in issue #1.
