@@ -1,5 +1,5 @@
-import { describe, test, expect } from "bun:test";
-import { splitFrontmatter, resolveLang, langForPath, fmtSize, esc } from "../../web/lib.js";
+import { describe, expect, test } from "bun:test";
+import { esc, fmtSize, langForPath, resolveLang, splitFrontmatter } from "../../web/lib.js";
 
 describe("splitFrontmatter", () => {
   test("parses rows and pads the body to preserve line numbers", () => {

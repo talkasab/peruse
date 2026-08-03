@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
-// peruse [path] [--port 7440] [--host 127.0.0.1] [--no-open]
-import { resolve } from "node:path";
 import { existsSync, statSync } from "node:fs";
 import { networkInterfaces } from "node:os";
+// peruse [path] [--port 7440] [--host 127.0.0.1] [--no-open]
+import { resolve } from "node:path";
 import { startServer } from "../server/index.js";
 
 // The watcher costs one fd per watched path, and stock shells (macOS: 256)
@@ -13,10 +13,15 @@ if (process.platform !== "win32" && !process.env.PERUSE_FDS_RAISED) {
   const soft = Number(Bun.spawnSync(["sh", "-c", "ulimit -n"]).stdout.toString().trim()) || 0;
   if (soft > 0 && soft < 4096) {
     const proc = Bun.spawnSync(
-      ["sh", "-c", 'ulimit -n 10240 2>/dev/null || ulimit -n "$(ulimit -Hn)" 2>/dev/null; exec "$@"', "sh",
-        process.execPath, ...process.argv.slice(1)],
-      { stdio: ["inherit", "inherit", "inherit"],
-        env: { ...process.env, PERUSE_FDS_RAISED: "1" } },
+      [
+        "sh",
+        "-c",
+        'ulimit -n 10240 2>/dev/null || ulimit -n "$(ulimit -Hn)" 2>/dev/null; exec "$@"',
+        "sh",
+        process.execPath,
+        ...process.argv.slice(1),
+      ],
+      { stdio: ["inherit", "inherit", "inherit"], env: { ...process.env, PERUSE_FDS_RAISED: "1" } },
     );
     process.exit(proc.exitCode ?? 0);
   }
@@ -37,19 +42,30 @@ Options:
   --help        Show this help`;
 
 const args = process.argv.slice(2);
-let root = ".", port = 7440, host = "127.0.0.1", open = true, portFixed = false;
+let root = ".",
+  port = 7440,
+  host = "127.0.0.1",
+  open = true,
+  portFixed = false;
 for (let i = 0; i < args.length; i++) {
   const a = args[i];
-  if (a === "--help" || a === "-h") { console.log(HELP); process.exit(0); }
-  else if (a === "--version" || a === "-v") {
+  if (a === "--help" || a === "-h") {
+    console.log(HELP);
+    process.exit(0);
+  } else if (a === "--version" || a === "-v") {
     const pkg = await import("../package.json");
-    console.log(pkg.default.version); process.exit(0);
-  }
-  else if (a === "--port") { port = Number(args[++i]); portFixed = true; }
-  else if (a === "--host") host = args[++i];
+    console.log(pkg.default.version);
+    process.exit(0);
+  } else if (a === "--port") {
+    port = Number(args[++i]);
+    portFixed = true;
+  } else if (a === "--host") host = args[++i];
   else if (a === "--no-open") open = false;
   else if (!a.startsWith("-")) root = a;
-  else { console.error(`Unknown option: ${a}\n\n${HELP}`); process.exit(1); }
+  else {
+    console.error(`Unknown option: ${a}\n\n${HELP}`);
+    process.exit(1);
+  }
 }
 
 root = resolve(root);
@@ -66,7 +82,9 @@ let started;
 try {
   started = await startServer({ root, port, host, portFixed });
 } catch (err) {
-  if (err?.code === "EADDRINUSE") {
+  const addressInUse =
+    typeof err === "object" && err !== null && "code" in err && err.code === "EADDRINUSE";
+  if (addressInUse) {
     console.error(`peruse: port ${port} is already in use${portFixed ? "" : " (and the next 20)"}`);
     process.exit(1);
   }
@@ -86,8 +104,11 @@ if (host === "0.0.0.0" || host === "::") {
 console.log(`peruse — serving ${root}\n${urls.map((u) => `  → ${u}`).join("\n")}`);
 if (open) {
   const url = urls[0];
-  const cmd = process.platform === "darwin" ? ["open", url]
-    : process.platform === "win32" ? ["cmd", "/c", "start", "", url]
-    : ["xdg-open", url];
+  const cmd =
+    process.platform === "darwin"
+      ? ["open", url]
+      : process.platform === "win32"
+        ? ["cmd", "/c", "start", "", url]
+        : ["xdg-open", url];
   Bun.spawn(cmd, { stdout: "ignore", stderr: "ignore" }).unref();
 }

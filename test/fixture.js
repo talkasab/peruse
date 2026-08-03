@@ -7,15 +7,14 @@
 // `!stats.isFile() && !stats.isDirectory()` skip (server/index.js) is
 // exercised only implicitly, if at all, elsewhere; adding a FIFO here to
 // close that gap would hang the whole suite, so it's left uncovered.
-import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startServer } from "../server/index.js";
 
 function sh(cwd, ...cmd) {
   const r = Bun.spawnSync(cmd, { cwd, stdout: "pipe", stderr: "pipe" });
-  if (r.exitCode !== 0)
-    throw new Error(`${cmd.join(" ")} failed: ${r.stderr.toString()}`);
+  if (r.exitCode !== 0) throw new Error(`${cmd.join(" ")} failed: ${r.stderr.toString()}`);
   return r.stdout.toString();
 }
 
@@ -77,8 +76,7 @@ A paragraph that will be modified.
 ${Array.from({ length: 30 }, (_, i) => `Filler paragraph ${i} giving the page real scroll height.`).join("\n\n")}
 `;
 
-export const GUIDE_EDITED = GUIDE_BASE
-  .replace("## Section One", "## Section One Edited")
+export const GUIDE_EDITED = GUIDE_BASE.replace("## Section One", "## Section One Edited")
   .replace("will be modified", "HAS been modified")
   .replace("bullet three will change", "bullet three CHANGED");
 
@@ -103,8 +101,8 @@ export function makeFixtureRepo() {
   g("commit", "-qm", "baseline");
 
   // worktree state
-  writeFileSync(join(dir, "src/util.py"), UTIL_EDITED);       // M, 4 separated hunks
-  writeFileSync(join(dir, "docs/guide.md"), GUIDE_EDITED);    // M, 3 changed blocks
+  writeFileSync(join(dir, "src/util.py"), UTIL_EDITED); // M, 4 separated hunks
+  writeFileSync(join(dir, "docs/guide.md"), GUIDE_EDITED); // M, 3 changed blocks
   writeFileSync(join(dir, "docs/new.md"), "# Brand new\n\nAll of this is new.\n"); // U
   writeFileSync(join(dir, "data.bin"), Buffer.from(Array.from({ length: 512 }, (_, i) => i % 256))); // U binary
   writeFileSync(join(dir, "ignored.log"), "ignored file\n");
@@ -148,10 +146,17 @@ export async function startFixtureServer(root, port, opts = {}) {
   // watchBudget option takes precedence over the fd-derived default without
   // touching process.env (which would race if tests ever ran in parallel).
   const { budget, ...rest } = opts;
-  const srv = await startServer({ root, port, host: "127.0.0.1", watchBudget: budget ?? 5000, ...rest });
+  const srv = await startServer({
+    root,
+    port,
+    host: "127.0.0.1",
+    watchBudget: budget ?? 5000,
+    ...rest,
+  });
   const base = `http://127.0.0.1:${srv.port}`;
   return {
-    ...srv, base,
+    ...srv,
+    base,
     async json(path) {
       const r = await fetch(base + path);
       return { status: r.status, body: r.status === 200 ? await r.json() : null };

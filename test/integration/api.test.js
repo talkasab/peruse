@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { makeFixtureRepo, makePlainDir, startFixtureServer } from "../fixture.js";
 
 let srv, plain;
@@ -6,12 +6,15 @@ beforeAll(async () => {
   srv = await startFixtureServer(makeFixtureRepo(), 7511);
   plain = await startFixtureServer(makePlainDir(), 7521);
 });
-afterAll(async () => { await srv?.cleanup(); await plain?.cleanup(); });
+afterAll(async () => {
+  await srv?.cleanup();
+  await plain?.cleanup();
+});
 
 const findNode = (tree, path) => {
   for (const n of tree) {
     if (n.path === path) return n;
-    if (n.dir && path.startsWith(n.path + "/")) return findNode(n.children, path);
+    if (n.dir && path.startsWith(`${n.path}/`)) return findNode(n.children, path);
   }
   return null;
 };
@@ -67,14 +70,17 @@ describe("/api/file", () => {
     const { body } = await srv.json("/api/file?path=src/util.py");
     expect(body.status).toBe("M");
     expect(body.hunks.map((h) => [h.newStart, h.kind])).toEqual([
-      [3, "modified"], [7, "added"], [13, "deleted"], [15, "added"],
+      [3, "modified"],
+      [7, "added"],
+      [13, "deleted"],
+      [15, "added"],
     ]);
     const first = body.hunks[0];
     expect(first.patch).toContain("-def load(path):");
     expect(first.patch).toContain('+def load(path, mode="r"):');
-    expect(first.patch).toContain(" import os");            // context above
+    expect(first.patch).toContain(" import os"); // context above
     expect(first.patch).toContain("        return f.read()"); // context below
-    expect(first.patch).not.toContain("+def exists");       // neighbor's additions never merge in
+    expect(first.patch).not.toContain("+def exists"); // neighbor's additions never merge in
   });
 
   test("untracked file → single added hunk; binary → flagged, no content", async () => {

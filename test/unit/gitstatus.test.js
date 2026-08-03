@@ -1,5 +1,5 @@
-import { describe, test, expect } from "bun:test";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { describe, expect, test } from "bun:test";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gitStatus } from "../../server/index.js";
@@ -18,8 +18,11 @@ async function withTmpRepo(fn) {
   g("config", "user.name", "Test");
   // fn is async — must be awaited before cleanup, or rmSync deletes the repo
   // out from under the still-pending gitStatus() call.
-  try { return await fn(dir, g); }
-  finally { rmSync(dir, { recursive: true, force: true }); }
+  try {
+    return await fn(dir, g);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 }
 
 describe("gitStatus", () => {

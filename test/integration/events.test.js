@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { appendFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { makeFixtureRepo, startFixtureServer } from "../fixture.js";
@@ -9,7 +9,9 @@ beforeAll(async () => {
   srv = await startFixtureServer(root, 7531);
   await srv.ready; // wait for the real signal (chokidar's initial scan), not a guessed sleep
 });
-afterAll(async () => { await srv?.cleanup(); });
+afterAll(async () => {
+  await srv?.cleanup();
+});
 
 // Read SSE events from a fresh connection until predicate matches or timeout.
 // `never`, if given, is checked against every event seen (including the one
@@ -44,7 +46,9 @@ async function nextEvent(predicate, { timeout = 4000, act, never } = {}) {
           if (predicate(ev)) return ev;
         }
     }
-  } finally { reader.cancel().catch(() => {}); }
+  } finally {
+    reader.cancel().catch(() => {});
+  }
   return null;
 }
 
@@ -96,7 +100,7 @@ describe("SSE change stream", () => {
   test("idle SSE connections survive past 10 s (incident 3087c19: Bun idleTimeout)", async () => {
     const res = await fetch(`${srv.base}/api/events`);
     const reader = res.body.getReader();
-    const first = await reader.read();            // retry preamble
+    const first = await reader.read(); // retry preamble
     expect(first.done).toBe(false);
     await new Promise((r) => setTimeout(r, 11_500));
     // connection must still be writable/open: a change must still reach us

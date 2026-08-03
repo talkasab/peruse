@@ -1,10 +1,12 @@
-import { describe, test, expect, afterAll } from "bun:test";
-import { makeFixtureRepo, makePlainDir, startFixtureServer } from "../fixture.js";
-import { startServer } from "../../server/index.js";
+import { afterAll, describe, expect, test } from "bun:test";
 import { rmSync } from "node:fs";
+import { startServer } from "../../server/index.js";
+import { makeFixtureRepo, makePlainDir, startFixtureServer } from "../fixture.js";
 
 const cleanups = [];
-afterAll(async () => { for (const c of cleanups.reverse()) await c(); });
+afterAll(async () => {
+  for (const c of cleanups.reverse()) await c();
+});
 
 describe("startup behaviors", () => {
   test("port fallback walks forward; pinned port fails loudly", async () => {
@@ -23,9 +25,13 @@ describe("startup behaviors", () => {
     // failed instance to close them itself).
     let err = null;
     const dir = makePlainDir();
-    try { await startServer({ root: dir, port: a.port, host: "127.0.0.1", portFixed: true }); }
-    catch (e) { err = e; }
-    finally { rmSync(dir, { recursive: true, force: true }); }
+    try {
+      await startServer({ root: dir, port: a.port, host: "127.0.0.1", portFixed: true });
+    } catch (e) {
+      err = e;
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
     expect(err?.code).toBe("EADDRINUSE");
   });
 

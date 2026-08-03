@@ -4,6 +4,39 @@ Narrative record of work sessions — what changed, what we learned, and why.
 Newest first. (The [CHANGELOG](../CHANGELOG.md) is the user-facing summary;
 this is the engineering story.)
 
+## 2026-08-03 — Biome and full-strict JavaScript checking (#16)
+
+- Added Biome 2.5.6 for formatting, recommended lint rules, and import
+  organization, plus TypeScript 7.0.2 for `allowJs`/`checkJs` analysis with no
+  emit. `bun run check` is the read-only combined gate; `bun run fix` applies
+  formatting and safe fixes. Generated `dist/` output is excluded.
+- Split type environments so the CLI/server see Bun globals while the bundled
+  client sees only browser globals. Both configs run full `strict`, including
+  `noImplicitAny`; the client declaration file stubs only the two markdown-it
+  plugins without bundled types and declares `window.Alpine`.
+- A follow-up trial brought `test/` under a mixed Bun+DOM config and immediately
+  surfaced roughly 200 diagnostics across all 12 test files: fixture/helper
+  parameters, Playwright evaluation globals and DOM assertions, test-only null
+  assertions, and conflicting stream types from importing server and web code.
+  That is a separate test-harness typing project, not a small config gap, so the
+  scope is explicit: production JavaScript is full-strict; tests are Biome-only.
+- Full strictness turned previously implicit server/client JSON contracts into
+  JSDoc shapes for trees, files, hunks, git state, SSE events, and server start
+  options. It also required safe narrowing of caught errors and DOM query
+  results, made `watchBudget` correctly optional to callers, replaced boolean
+  subtraction in the directory sort with numeric conversion, and tied hunk
+  generation to non-null text content rather than relying on indirect binary
+  narrowing.
+- Biome identified five buttons without explicit `type="button"`; those are now
+  safe if the header is ever embedded in a form. CSS ordering was corrected for
+  the ignored-row selectors. Three `!important` declarations remain with
+  reasoned inline ignores: Alpine cloaking and the two necessary overrides of
+  Shiki-generated inline backgrounds.
+- Biome's enforced initial formatting touched the repository JavaScript and CSS
+  mechanically; a second writer run made no changes. The final gate passed,
+  startup served both `/` and `/api/tree`, the build succeeded, and the complete
+  suite passed 66 tests including Chromium.
+
 ## 2026-08-02 — A "flaky test" that was an application race (#26)
 
 - The E2E suite sat at 2 pass / 5 fail. It failed identically on the untouched

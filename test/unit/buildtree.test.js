@@ -1,5 +1,5 @@
-import { describe, test, expect } from "bun:test";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { describe, expect, test } from "bun:test";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildTree } from "../../server/index.js";
@@ -10,8 +10,11 @@ const gs = (status = new Map(), ignored = new Set()) => ({ status, ignored });
 
 function withTmpDir(fn) {
   const dir = mkdtempSync(join(tmpdir(), "peruse-buildtree-"));
-  try { return fn(dir); }
-  finally { rmSync(dir, { recursive: true, force: true }); }
+  try {
+    return fn(dir);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 }
 
 describe("buildTree", () => {

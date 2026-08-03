@@ -5,10 +5,12 @@ import createDOMPurify from "dompurify";
 // names as inert custom data.
 const ALPINE_DIRECTIVE = /^(?:x-|@|:)/i;
 
+/** @param {import("dompurify").WindowLike} browserWindow */
 export function createHTMLSanitizer(browserWindow) {
   const purifier = createDOMPurify(browserWindow);
   purifier.addHook("uponSanitizeAttribute", (_node, data) => {
     if (ALPINE_DIRECTIVE.test(data.attrName)) data.keepAttr = false;
   });
+  /** @param {string} html */
   return (html) => purifier.sanitize(html);
 }

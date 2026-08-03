@@ -1,20 +1,19 @@
-import { describe, test, expect } from "bun:test";
-import { JSDOM } from "jsdom";
-import MarkdownIt from "markdown-it";
-import taskLists from "markdown-it-task-lists";
-import anchor from "markdown-it-anchor";
-import footnote from "markdown-it-footnote";
-import { createHighlighterCore } from "shiki/core";
-import { createJavaScriptRegexEngine } from "shiki/engine/javascript";
+import { describe, expect, test } from "bun:test";
+import langJs from "@shikijs/langs/javascript";
 import latte from "@shikijs/themes/catppuccin-latte";
 import mocha from "@shikijs/themes/catppuccin-mocha";
-import langJs from "@shikijs/langs/javascript";
+import { JSDOM } from "jsdom";
+import MarkdownIt from "markdown-it";
+import anchor from "markdown-it-anchor";
+import footnote from "markdown-it-footnote";
+import taskLists from "markdown-it-task-lists";
+import { createHighlighterCore } from "shiki/core";
+import { createJavaScriptRegexEngine } from "shiki/engine/javascript";
 import { createHTMLSanitizer } from "../../web/sanitize.js";
 
 const window = new JSDOM("").window;
 const sanitizeHTML = createHTMLSanitizer(window);
-const md = new MarkdownIt({ html: true, linkify: true })
-  .use(taskLists).use(anchor).use(footnote);
+const md = new MarkdownIt({ html: true, linkify: true }).use(taskLists).use(anchor).use(footnote);
 const highlighter = await createHighlighterCore({
   themes: [latte, mocha],
   langs: [langJs],
@@ -54,7 +53,8 @@ describe("rendered HTML sanitization", () => {
   });
 
   test("preserves legitimate Markdown HTML and generated markup unchanged", () => {
-    const rendered = md.render(`# Heading
+    const rendered =
+      md.render(`# Heading
 
 - [x] complete
 
@@ -63,11 +63,12 @@ Footnote[^1]
 [^1]: note
 
 <details><summary>More</summary><kbd>Ctrl</kbd>+<kbd>K</kbd><sub>sub</sub><sup>sup</sup><br><a href="https://example.com"><img src="badge.svg" width="120" height="20" align="left"></a><div align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="dark.png"><img src="light.png"></picture></div><a name="named-anchor"></a></details>
-`) + highlighter.codeToHtml("const answer = 42;", {
-      lang: "javascript",
-      themes: { light: "catppuccin-latte", dark: "catppuccin-mocha" },
-      defaultColor: false,
-    });
+`) +
+      highlighter.codeToHtml("const answer = 42;", {
+        lang: "javascript",
+        themes: { light: "catppuccin-latte", dark: "catppuccin-mocha" },
+        defaultColor: false,
+      });
 
     const clean = sanitizeHTML(rendered);
     expect(clean).toBe(rendered);
@@ -79,8 +80,9 @@ Footnote[^1]
     expect(document.querySelector("h1").id).toBe("heading");
     expect(document.querySelector(".footnote-ref a").getAttribute("href")).toBe("#fn1");
     expect(document.querySelector(".footnote-backref").getAttribute("href")).toBe("#fnref1");
-    expect(document.querySelector(".shiki .line span").getAttribute("style"))
-      .toContain("--shiki-light:");
+    expect(document.querySelector(".shiki .line span").getAttribute("style")).toContain(
+      "--shiki-light:",
+    );
   });
 
   test("markdown-it already rejects javascript links", () => {

@@ -213,6 +213,36 @@ a quarter of runs. The fix is in `selectFile` (see Navigation vs. live refresh
 above); `navigation.test.js` drives the race deterministically. The sanitization
 and navigation regressions each use their own fixture, server, and page.
 
+## Development tooling
+
+Biome 2.x is the repository-wide formatter, import organizer, and recommended
+rules linter. It formats JavaScript, CSS, and JSON; HTML remains unformatted but
+is linted. Generated `dist/` content is excluded. Three CSS `!important` uses
+carry reasoned inline ignores because Alpine cloaking and the app's Shiki theme
+overrides must beat other display/background declarations.
+
+TypeScript checks the production plain ESM JavaScript through JSDoc with
+`allowJs`, `checkJs`, `noEmit`, and full `strict` mode (including
+`noImplicitAny`). The root `tsconfig.json` covers `bin/` and `server/` with Bun
+globals; `web/tsconfig.json` covers `web/*.js` with DOM libraries and no Bun
+globals. `web/globals.d.ts` contains declarations only for the two markdown-it
+plugins that do not ship types and the Alpine window global. There is still no
+TypeScript compile step.
+
+`test/` is linted and formatted by Biome but is not type-checked. A trial
+test-scoped config surfaced roughly 200 diagnostics across the 12 test files:
+test fixture/helper parameters, Playwright page-evaluation globals and DOM
+assertions, test-only null assertions, and conflicting Bun-vs-DOM stream types
+from importing both server and web modules. Closing that separate body of work
+would require broad test-harness annotation rather than a small configuration
+extension, so issue #16 deliberately limits full-strict checking to production
+code.
+
+- `bun run lint` — read-only Biome format, lint, and import-order gate.
+- `bun run fix` — apply Biome formatting and safe fixes.
+- `bun run typecheck` — run both production JavaScript type-checking environments.
+- `bun run check` — the single quality gate: lint, then type-check.
+
 No CI is wired up; the suite runs locally (`bun test`, `bun run test:e2e`).
 CI automation is tracked in issue #1.
 

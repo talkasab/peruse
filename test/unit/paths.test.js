@@ -1,6 +1,6 @@
-import { describe, test, expect } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { safePath } from "../../server/index.js";
-import { resolveRel, hunkRange } from "../../web/lib.js";
+import { hunkRange, resolveRel } from "../../web/lib.js";
 
 describe("safePath (traversal guard)", () => {
   const root = "/srv/repo";

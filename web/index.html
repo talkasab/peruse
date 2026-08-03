@@ -18,9 +18,9 @@
     <label class="toggle" x-show="isRepo">
       <input type="checkbox" x-model="changedOnly"> changed only
     </label>
-    <button class="chip" @click="showIgnored = !showIgnored"
+    <button type="button" class="chip" @click="showIgnored = !showIgnored"
             x-text="showIgnored ? 'hide ignored' : 'show ignored'"></button>
-    <button class="chip theme-btn" @click="toggleTheme()"
+    <button type="button" class="chip theme-btn" @click="toggleTheme()"
             x-text="theme === 'mocha' ? '☀' : '☾'" title="Toggle theme"></button>
   </header>
 
@@ -50,11 +50,11 @@
         <span class="status" x-show="file?.status" :data-s="file?.status" x-text="file?.status"></span>
         <span class="spacer"></span>
         <span class="chip chip-group" x-show="reviewable.length">
-          <button class="chip-arrow" @click="cycleHunk(-1)" title="Previous change">‹</button>
+          <button type="button" class="chip-arrow" @click="cycleHunk(-1)" title="Previous change">‹</button>
           <span x-text="hunkChip"></span>
-          <button class="chip-arrow" @click="cycleHunk(1)" title="Next change">›</button>
+          <button type="button" class="chip-arrow" @click="cycleHunk(1)" title="Next change">›</button>
         </span>
-        <button class="chip" x-show="isMarkdown && !file?.binary" @click="raw = !raw"
+        <button type="button" class="chip" x-show="isMarkdown && !file?.binary" @click="raw = !raw"
                 x-text="raw ? 'Rendered' : 'Raw'"></button>
       </div>
       <div id="viewer-scroll" x-ref="scroll">
