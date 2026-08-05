@@ -332,7 +332,10 @@ they guard.
   and total Git spawns for a realistic navigation counted through patched
   `Bun.spawn`, cached target identity/missing state, SSE coalescing and gitignore-skip,
   idle-connection survival, port fallback, tiny-watch-budget survival,
-  non-git degradation).
+  non-git degradation, watcher-stall recovery, runtime shutdown draining, and
+  the composed watcher/cache lifecycle — route invalidation settling a
+  scan-broken runtime's pending readiness, runtime-level startup coalescing,
+  and SSE stream EOF when a recovered runtime is invalidated).
 - `bun run test:e2e` → **E2E** (`test/e2e/`): five core Chromium journeys —
   smoke, code review (exact marks, popup scope), markdown review (rail
   single-x measurement, innermost marks, arrows, links, pinned headers,
