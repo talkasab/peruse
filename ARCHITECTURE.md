@@ -122,7 +122,8 @@ Robustness (each learned from a real failure):
   rate-limit logged, never fatal.
 - Never watch gitignored dirs (they're never shown expanded). Ignore set
   refreshed from every git status call.
-- Watch budget: at most ⅛ of the real fd limit in distinct admitted paths
+- Watch budget: at most ⅛ of the real fd limit in distinct admitted paths,
+  shared by chokidar discovery and recovery fallback handles
   (chokidar holds fds per watched *file* under Bun and doesn't reliably
   pass `stats` to the ignore callback — admission is by first sight).
   `PERUSE_WATCH_BUDGET` overrides; `startServer`'s `watchBudget` option (used
@@ -131,8 +132,48 @@ Robustness (each learned from a real failure):
   is disabled entirely with a clear message instead.
 - The first project request waits for that project's lazy watcher's initial
   scan (or the no-watch fallback) before responding, so an SSE client cannot
-  mutate a file in the gap between connecting and watcher readiness. Server
-  shutdown closes every watcher and ping timer.
+  mutate a file in the gap between connecting and watcher readiness. Closing a
+  runtime always settles pending readiness with a distinct closure error;
+  request resolution converts only that signal to not-found and rechecks the
+  closed state after a fulfilled wait, so awaiters neither hang nor receive a
+  closed runtime. The readiness rejection has a permanent observer so closing
+  an unused runtime cannot emit an unhandled rejection. Server shutdown closes
+  every watcher, fallback watch, reconciliation timer, and ping timer.
+- Stall watchdog (issue #17). chokidar's scanner resolves every symlink it
+  meets with `realpath()` and survives only ENOENT/EPERM/EACCES/ELOOP; any
+  other errno (ENOTDIR in practice — a link pointing *through* a regular
+  file) destroys that directory's listing, silently and without an `error`
+  event. That listing both registers the watches and decrements chokidar's
+  ready count, so one such link leaves the directory unwatched *and* 'ready'
+  pending forever — and since the first request awaits `ready`, the project
+  would serve nothing at all. The ignore callback cannot prevent it (the link
+  is resolved before any filter runs), so the scan is watched for a stall
+  instead: every filtered path is a heartbeat, and 3 s of silence with
+  'ready' still pending triggers an inspection. Recovery names the offending
+  links (`findScanBreakingLinks`) and covers each admitted stranded directory
+  with a plain `fs.watch`, then resolves `ready`. The fallback treats the
+  platform event as an invalidation hint and diffs guarded `lstat` directory
+  snapshots, so rename-over atomic saves report the replaced target rather
+  than only the temporary filename. New directories are checked before being
+  handed to chokidar; a later poisoned directory moved into a recovered
+  directory therefore receives the same fallback. Fallback and traversal use
+  the normal skip/budget policy, and direct chokidar events are suppressed
+  wherever snapshot reconciliation owns coverage, making late completion
+  idempotent.
+
+  Snapshot reconciliation cannot see a same-inode, same-length in-place
+  rewrite whose nanosecond mtime is restored, because its
+  `dev:ino:mode:size:mtimeNs` signature is unchanged. Timestamp-preserving
+  deployment tools can create that shape; normal chokidar coverage misses it
+  too, so this is a general watcher limitation rather than a recovery
+  regression.
+
+  Three seconds is deliberately a quiet-time heuristic, not proof that a scan
+  is dead. A healthy scan blocked in one unusually slow filesystem operation
+  can release the waiting request early; if inspection finds no culprit the
+  server warns that live coverage may remain incomplete while chokidar finishes
+  normally. Recovery never installs duplicate handles, and all timer-driven
+  filesystem operations tolerate deletion and permission changes.
 
 ## Client (`web/`)
 
@@ -215,10 +256,13 @@ Three tiers (no test framework dependency; `playwright-core` for E2E). The
 core browser journeys share a fixture from `test/fixture.js`, which builds a
 throwaway git repo covering every state peruse renders — including the
 shapes behind past incidents (separated edits, symlinks, ignored dirs,
-oversized dirs). No socket/FIFO is included: chokidar's initial scan hangs
-indefinitely on one (reproduced under Bun on Linux; issue #20), so that
-corner of the watcher's `ignored` skip is untested rather than risk hanging
-the suite.
+oversized dirs). No socket/FIFO is included: the shared fixture stays portable
+and therefore does not directly cover the stats-based special-file skip. Raw
+chokidar reached `ready` without error with a pre-existing FIFO under both Bun
+1.3.14 and Node 26.6.0 (defaults, `ignoreInitial`, `followSymlinks:false`, and
+both options); a standalone server probe separately confirms peruse filters
+the FIFO and serves the tree normally. The contrary premise recorded in issue
+#20 did not reproduce in this verification matrix.
 Regression assertions are tagged with the commit that fixed the incident
 they guard.
 
@@ -277,12 +321,15 @@ code.
 - `bun run typecheck` — run both production JavaScript type-checking environments.
 - `bun run check` — the single quality gate: lint, then type-check.
 
-No CI is wired up; the suite runs locally (`bun test`, `bun run test:e2e`).
+No CI is wired up; the suite runs locally (`bun run test`, `bun run test:e2e`).
 CI automation is tracked in issue #1.
 
-Known watcher limitation: a directory containing a dangling symlink is
-silently unwatched by chokidar (issue #17); tree/file serving is
-unaffected, only live updates for that directory.
+Known watcher limitation: on a server that never entered recovery, a
+scan-breaking link created directly inside an already-watched directory may
+still be missed (chokidar's re-listing dies before emitting it). Once recovery
+is active, newly moved/created directories observed by a fallback are checked
+recursively; this does not claim to turn chokidar's normal post-ready scans
+into a fully supervised scanner.
 
 ## Layout invariants
 

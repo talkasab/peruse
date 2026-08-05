@@ -1,12 +1,12 @@
 // Shared fixture: a throwaway git repo exercising every state peruse
 // renders, including the shapes that caused real incidents (see DEVLOG):
 // separated edits, symlinks, ignored dirs, oversized dirs.
-// NOTE: no socket/FIFO is included — chokidar's initial scan hangs
-// indefinitely on a directory containing one (reproduced under Bun on
-// Linux: `chokidar.watch()` never fires 'ready'). The `ignored` callback's
-// `!stats.isFile() && !stats.isDirectory()` skip (server/index.js) is
-// exercised only implicitly, if at all, elsewhere; adding a FIFO here to
-// close that gap would hang the whole suite, so it's left uncovered.
+// NOTE: no socket/FIFO is included: this shared repository fixture stays
+// filesystem-portable, so the `ignored` callback's special-file skip is
+// verified by standalone probes instead. A pre-existing FIFO does not hang
+// raw chokidar in the current Bun/Node matrix, and the real peruse server
+// filters it and serves normally; the omission is fixture scope, not a hang
+// workaround.
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -123,9 +123,10 @@ export function makeFixtureRepo() {
   writeFileSync(join(dir, "ignored-dir/junk.txt"), "junk\n");
 
   // incident e30232f: dangling symlink + symlink chain must not crash anything.
-  // Kept in their own dir: a dangling symlink makes chokidar silently drop
-  // the containing dir's watch (known limitation, issue #17) — it must not
-  // share a dir with paths whose live updates tests rely on.
+  // Kept in their own dir out of caution about symlink handling in the
+  // watcher; a merely dangling link turned out to be harmless there, while the
+  // links that do break chokidar's scan (issue #17, ENOTDIR-style) are built
+  // per-test in watch-recovery.test.js rather than shared here.
   mkdirSync(join(dir, "linkfarm"));
   symlinkSync("/nonexistent-target", join(dir, "linkfarm/dangling"));
   symlinkSync(join(dir, "README.md"), join(dir, "linkfarm/readme-link"));

@@ -4,6 +4,110 @@ Narrative record of work sessions — what changed, what we learned, and why.
 Newest first. (The [CHANGELOG](../CHANGELOG.md) is the user-facing summary;
 this is the engineering story.)
 
+## 2026-08-05 (later) — The watcher dead zone was worse, and different, than filed (#17)
+
+Readiness-settlement addendum, 2026-08-05:
+
+- Runtime teardown cleared the stall timer and watcher handles but left a
+  pending `ready` promise unresolved. If another operation invalidated a
+  runtime during its stalled initial scan, the request already awaiting that
+  runtime could therefore wait forever.
+- `close()` now rejects pending readiness with a typed closure signal instead
+  of fulfilling it: fulfillment would make a closed runtime indistinguishable
+  from a ready one. A permanent no-op rejection observer covers teardown with
+  zero waiters, while request resolution catches only the closure signal and
+  also checks for a close immediately after successful readiness.
+- The isolated ENOTDIR regression removes the project 300 ms into the stalled
+  scan and reconciles the runtime through the project listing. Before the fix,
+  the waiting request exceeded its independent 1 s deadline; after the fix it
+  returned HTTP 404 in 4.94 ms, with no `unhandledRejection` event.
+- Final gates: `bun run check` checked 31 files; unit/integration passed 80/80
+  (219 assertions); the separately invoked browser suites passed 11/11 (54
+  assertions). One initial browser run reported shared-page errors in the code
+  review journey; the prescribed command passed unchanged on rerun.
+
+Adversarial follow-up, 2026-08-05:
+
+- The first fallback trusted `fs.watch`'s optional filename. A measured
+  write-temp-then-rename save consequently reported only `.target.tmp`, not the
+  replaced `target.txt`. Recovery now treats every platform event as a hint,
+  diffs guarded `lstat` snapshots, and emits the paths whose identities or
+  metadata actually changed. A vanished/unreadable directory simply loses its
+  fallback instead of throwing from a timer.
+- Recovery is repeatable for directories introduced beneath recovered
+  coverage: each new directory gets a bounded scan-breaking-link check before
+  chokidar owns it. A pre-populated ENOTDIR-poisoned directory moved into the
+  fixture now reports subsequent edits. Discovery and fallback handles share
+  the normal ignore/admission budget; the budget-1 probe admitted one root
+  candidate and skipped 120 rejected poisoned subtrees instead of opening 121
+  unbudgeted handles.
+- The heartbeat is a three-second quiet-time heuristic, not a proof of death.
+  A slow-but-live filesystem operation can release the first request early;
+  recovery is idempotent, snapshot-owned paths suppress overlapping chokidar
+  events, and a late `ready` is harmless, but coverage can be incomplete until
+  that healthy scan finishes. This corrects the earlier “never mistaken” and
+  “live updates throughout” wording.
+- FIFO correction: the earlier raw-chokidar claim was false in the verified
+  environment. With a FIFO present before `watch()`, Bun 1.3.14 reached
+  `ready` in 3.1–4.0 ms and Node 26.6.0 in 3.3–6.2 ms, without errors, under
+  defaults, `ignoreInitial`, `followSymlinks:false`, and both options. The true
+  production half remains: peruse's stats filter excludes the FIFO and the
+  server returned HTTP 200 for `/api/tree`. This eight-run matrix disproved the
+  raw/peruse contrast that the earlier single probe and issue #20 recorded.
+- Snapshot reconciliation compares `dev:ino:mode:size:mtimeNs`. An in-place
+  equal-length rewrite that restores the original nanosecond mtime is therefore
+  invisible. Raw chokidar and healthy peruse coverage miss the same
+  timestamp-preserving deployment shape, so it is a general watcher caveat,
+  not a fallback regression.
+- Final gates: `bun run check` passed; unit/integration passed 79/79 (213
+  assertions); the separately invoked browser suites passed 11/11 (54
+  assertions).
+
+- The bug report said "a dangling symlink silently unwatches its directory."
+  Reproduction says otherwise: a plain dangling link (ENOENT) is harmless —
+  seven variants (relative, absolute, nested, loop, created after ready,
+  followSymlinks both ways, polling) all watched normally, and so did the real
+  fixture through the real server. Reproducing before theorizing paid off
+  again; the filed cause was a near miss.
+- Reading readdirp's source found the real rule. Its `_getEntryType` calls
+  `realpath()` on every symlink and treats only ENOENT/EPERM/EACCES/ELOOP as
+  survivable; any other errno calls `destroy()` on the directory's stream, and
+  chokidar's error handler then swallows ENOENT/ENOTDIR without emitting
+  `error`. The wild case is **ENOTDIR** — a link whose target path runs through
+  a regular file. The ignore callback cannot defend against it: readdirp
+  resolves the link *before* any filter is consulted.
+- **Identical under Node v26 and Bun 1.3.14** — upstream chokidar/readdirp, not
+  a Bun quirk. Worth filing there.
+- The impact was much worse than "lost SSE freshness". The destroyed listing is
+  also what decrements chokidar's ready count, so `ready` never fires — and
+  `resolveProject` awaits it on the first request. A single such link means the
+  project **serves nothing at all**; `/api/tree` hangs forever. Verified
+  end-to-end, and it belongs on the short list of candidate explanations for
+  the still-unexplained "serves nothing" hang of 2026-07-21.
+- Fix: treat the scan as dead when it goes quiet. Every path already passes
+  through the ignore callback, so that became the scan's heartbeat — 3 s of
+  silence with `ready` still pending triggers recovery inspection. Recovery walks for the
+  culprits, names them, covers each stranded directory with a plain `fs.watch`,
+  and hands its subdirectories back to chokidar. Measured on the recovered
+  directory: changes, new files, deletions, pre-existing subdirectories, and
+  subdirectories created afterwards (those need the explicit re-add — `fs.watch`
+  is not recursive) all report in the original fixture; nothing spurious fires at recovery time,
+  because `ignoreInitial` still holds while `ready` is pending.
+- Rejected alternatives, each disproved by experiment: a polling watcher on the
+  stranded dir (readdirp destroys the stream there too — polling changes the
+  backend, not the listing), filtering the link via `ignored` (runs too late),
+  and a mandatory startup pre-scan (a second full walk on every start, to pay
+  for a rare pathology; the stall signal is free).
+- Residual gap: unless recovery is already active, a scan-breaking link
+  introduced directly into an existing watched directory may not itself be
+  announced. A stall from any other cause degrades to a warning plus a running
+  server instead of a hang.
+- Also checked: a FIFO in the tree does *not* hang peruse; the ignore
+  callback's stats check filters it. Later verification also found raw
+  chokidar itself reaches `ready` with that FIFO in the current Bun/Node
+  environment, correcting the initial contrast. The fixture's claim that
+  dangling links strand their directory was corrected.
+
 ## 2026-08-05 — Multi-root code-review hardening
 
 - Registered roots that still exist as non-directories were reaching Git as a
@@ -341,13 +445,12 @@ priority list end to end.
   origPath field skip, repo-prefix slicing for a served subdirectory,
   unborn-HEAD empty-tree base) — both were previously exercised only
   incidentally through the HTTP-level integration tests.
-- Attempted, reverted: adding a FIFO to the fixture (to exercise the
-  watcher's `!isFile && !isDirectory` skip) hangs chokidar's initial scan
-  indefinitely under Bun on Linux — reproduced in isolation
-  (`chokidar.watch()` never fires `ready` on a directory containing one).
-  Since fixing that would mean changing watcher behavior beyond the three
-  sanctioned product fixes, the fixture stays without socket/FIFO coverage
-  and the docs say so plainly instead of overclaiming it.
+- Attempted, reverted at the time: adding a FIFO to the fixture was reported
+  to hang chokidar's initial scan under Bun on Linux. The 2026-08-05 issue #17
+  follow-up disproved that result in an eight-run Bun/Node configuration
+  matrix: every raw watcher reached `ready` without error. The fixture still
+  omits sockets/FIFOs to remain filesystem-portable, not to avoid a reproduced
+  hang; peruse's special-file filter is characterized by standalone probes.
 - E2E: the `pageerror` listener used to `throw`, which doesn't fail a test
   (listeners aren't on the test's call stack) — now collects into an array
   asserted empty in `afterEach`. The pinned-header scroll test used a

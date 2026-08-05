@@ -12,6 +12,13 @@ date and becomes the GitHub release notes (see
 ## [Unreleased]
 
 ### Fixed
+- A broken symlink that points *through* a file (for example
+  `dist/bundle.js/index.js`) no longer stops a project from loading. Such a
+  link silently aborted the file watcher's startup scan, and because the first
+  page load waits for that scan, the project hung instead of serving. peruse
+  now detects the stalled scan, names the offending link on the console, and
+  keeps admitted files live through atomic saves and later poisoned
+  subdirectories (#17)
 - Registered project roots replaced by files no longer break the project list,
   and `peruse rm` now removes exactly one name-or-canonical-path selection,
   including projects registered through symlinks

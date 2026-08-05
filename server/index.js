@@ -1,6 +1,13 @@
 // peruse server: static page + file/git/events API. All rendering is client-side.
 
-import { existsSync, readdirSync, statSync } from "node:fs";
+import {
+  existsSync,
+  watch as fsWatch,
+  lstatSync,
+  readdirSync,
+  realpathSync,
+  statSync,
+} from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import chokidar from "chokidar";
@@ -289,6 +296,70 @@ export function safePath(root, rel) {
   return { abs, rel: inside };
 }
 
+// chokidar's directory listing (readdirp) calls realpath() on every symlink it
+// meets, and survives only ENOENT/EPERM/EACCES/ELOOP; any other errno destroys
+// the stream for that directory. That listing is what registers the watches AND
+// what decrements chokidar's ready count, so a single such link both unwatches
+// the whole directory (silently — the errno is swallowed, no 'error' event) and
+// leaves 'ready' pending forever. Reproduced identically under Bun and Node, so
+// it is upstream, not a Bun quirk (issue #17).
+//
+// ENOTDIR is the one that happens in the wild: a link whose target path runs
+// through a component that is a file, e.g. `dist/lib.js/index.js` after a build
+// output changed shape. A merely dangling link (ENOENT) is survivable and does
+// NOT cause this — the ignore callback cannot help either way, since readdirp
+// resolves the link before any filter is consulted.
+const SURVIVABLE_LINK_ERRORS = new Set(["ENOENT", "EPERM", "EACCES", "ELOOP"]);
+
+class RuntimeClosedError extends Error {
+  constructor() {
+    super("project runtime closed before watcher readiness");
+    this.name = "RuntimeClosedError";
+  }
+}
+
+/**
+ * Directories whose listing chokidar cannot finish, mapped to the offending
+ * links. Walked with dirents only, so symlinked directories are never
+ * descended into (no loops).
+ * @param {string} root
+ * @param {(rel: string) => boolean} [skip]
+ * @returns {Map<string, {name: string, code: string}[]>}
+ */
+export function findScanBreakingLinks(root, skip = () => false) {
+  /** @type {Map<string, {name: string, code: string}[]>} */
+  const found = new Map();
+  /** @param {string} dir */
+  const walk = (dir) => {
+    /** @type {import("node:fs").Dirent[]} */
+    let entries;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const abs = join(dir, entry.name);
+      // Admission applies before descending a directory. Still inspect a
+      // symlink in an admitted directory: the link itself may have exhausted
+      // the path budget, but it can be the reason that directory was stranded.
+      if (entry.isDirectory()) {
+        if (!skip(relative(root, abs))) walk(abs);
+      } else if (entry.isSymbolicLink()) {
+        try {
+          realpathSync(abs);
+        } catch (err) {
+          const code = /** @type {NodeJS.ErrnoException} */ (err).code ?? "";
+          if (SURVIVABLE_LINK_ERRORS.has(code)) continue;
+          found.set(dir, [...(found.get(dir) ?? []), { name: entry.name, code }]);
+        }
+      }
+    }
+  };
+  walk(root);
+  return found;
+}
+
 /** @param {string} root @param {number | undefined} watchBudget */
 async function createProjectRuntime(root, watchBudget) {
   /** @type {Set<ReadableStreamDefaultController<string>>} */
@@ -381,14 +452,187 @@ async function createProjectRuntime(root, watchBudget) {
   let budgetWarned = false;
   /** @type {import("chokidar").FSWatcher | null} */
   let watcher = null;
+  // Plain fs.watch handles covering directories chokidar's scan abandoned.
+  // Each has a directory snapshot: fs.watch filenames are only hints and are
+  // not reliable enough to identify rename-over/atomic saves.
+  /** @type {Map<string, import("node:fs").FSWatcher>} */
+  const fallbackWatchers = new Map();
+  /** @type {Map<string, Map<string, {signature: string, directory: boolean}>>} */
+  const fallbackSnapshots = new Map();
+  /** @type {Map<string, ReturnType<typeof setTimeout>>} */
+  const reconcileTimers = new Map();
+  /** @type {Map<string, ReturnType<typeof setTimeout>>} */
+  const verifyTimers = new Map();
+  /** @type {ReturnType<typeof setInterval> | null} */
+  let stallTimer = null;
+  let closed = false;
+  let recoveryActive = false;
+
+  // Path skips shared by the watcher's ignore callback and the fallback
+  // watches, which bypass chokidar entirely and so must filter for themselves.
+  /** @param {string} rel */
+  const skipRel = (rel) =>
+    rel.split("/").includes("node_modules") || rel.startsWith(".git/objects") || inIgnoredDir(rel);
+
+  /** Shared admission for chokidar and recovery traversal/fallback handles. @param {string} rel */
+  const admitRel = (rel) => {
+    if (skipRel(rel)) return false;
+    if (admitted.has(rel)) return true;
+    if (admitted.size >= WATCH_BUDGET) {
+      if (!budgetWarned) {
+        budgetWarned = true;
+        console.error(
+          `peruse: watch budget (${WATCH_BUDGET} paths, from the fd limit) ` +
+            `reached — live updates disabled for the rest of the tree; gitignore large ` +
+            `generated directories, raise \`ulimit -n\`, or set PERUSE_WATCH_BUDGET`,
+        );
+      }
+      return false;
+    }
+    admitted.add(rel);
+    return true;
+  };
+
+  /** @param {string} abs */
+  function noteChange(abs) {
+    const rel = relative(root, abs);
+    if (!rel) return;
+    if (rel === ".git" || rel.startsWith(".git/")) pendingGit = true;
+    else pendingChanged.add(rel);
+    if (!flushTimer) flushTimer = setTimeout(broadcast, 200);
+  }
+
+  /** @param {string} dir */
+  function snapshotDirectory(dir) {
+    /** @type {Map<string, {signature: string, directory: boolean}>} */
+    const snapshot = new Map();
+    try {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const abs = join(dir, entry.name);
+        if (skipRel(relative(root, abs))) continue;
+        try {
+          const st = lstatSync(abs, { bigint: true });
+          snapshot.set(entry.name, {
+            signature: `${st.dev}:${st.ino}:${st.mode}:${st.size}:${st.mtimeNs}`,
+            directory: entry.isDirectory(),
+          });
+        } catch {}
+      }
+      return snapshot;
+    } catch {
+      return null;
+    }
+  }
+
+  /** @param {string} dir */
+  function dropFallback(dir) {
+    const handle = fallbackWatchers.get(dir);
+    fallbackWatchers.delete(dir);
+    fallbackSnapshots.delete(dir);
+    const timer = reconcileTimers.get(dir);
+    if (timer) clearTimeout(timer);
+    reconcileTimers.delete(dir);
+    try {
+      handle?.close();
+    } catch {}
+  }
+
+  /** @param {string} dir @param {number} [delay] */
+  function scheduleVerification(dir, delay = 30) {
+    if (closed || verifyTimers.has(dir) || !admitRel(relative(root, dir))) return;
+    const timer = setTimeout(() => {
+      verifyTimers.delete(dir);
+      recoverSubtree(dir);
+    }, delay);
+    timer.unref?.();
+    verifyTimers.set(dir, timer);
+  }
+
+  /** @param {string} dir */
+  function reconcileFallback(dir) {
+    reconcileTimers.delete(dir);
+    if (closed || !fallbackWatchers.has(dir)) return;
+    const before = fallbackSnapshots.get(dir) ?? new Map();
+    const after = snapshotDirectory(dir);
+    if (!after) {
+      dropFallback(dir);
+      return;
+    }
+    fallbackSnapshots.set(dir, after);
+    for (const [name, current] of after) {
+      const prior = before.get(name);
+      if (!prior || prior.signature !== current.signature) noteChange(join(dir, name));
+      if (current.directory && !prior?.directory) scheduleVerification(join(dir, name));
+    }
+    for (const name of before.keys()) if (!after.has(name)) noteChange(join(dir, name));
+  }
+
+  /** @param {string} dir */
+  function scheduleReconcile(dir) {
+    if (closed || reconcileTimers.has(dir)) return;
+    const timer = setTimeout(() => reconcileFallback(dir), 20);
+    timer.unref?.();
+    reconcileTimers.set(dir, timer);
+  }
+
+  /** @param {string} dir @param {{name: string, code: string}[]} links */
+  function installFallback(dir, links) {
+    if (closed || fallbackWatchers.has(dir) || !admitRel(relative(root, dir))) return;
+    const initial = snapshotDirectory(dir);
+    if (!initial) return;
+    try {
+      const handle = fsWatch(dir, () => scheduleReconcile(dir));
+      handle.on("error", () => dropFallback(dir));
+      fallbackWatchers.set(dir, handle);
+      fallbackSnapshots.set(dir, initial);
+      const named = links
+        .map((link) => `${relative(root, join(dir, link.name))} (${link.code})`)
+        .join(", ");
+      console.error(
+        `peruse: ${named} breaks the file watcher's scan of ${relative(root, dir) || "."} — ` +
+          `falling back to a reconciled direct watch there; remove or fix the link to restore full watching`,
+      );
+      for (const [name, entry] of initial)
+        if (entry.directory) scheduleVerification(join(dir, name));
+      // Close the snapshot/watch installation race by reconciling once after
+      // the handle exists, independent of whether the platform emitted a hint.
+      scheduleReconcile(dir);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`peruse: watcher: ${message}`);
+    }
+  }
+
+  /** @param {string} scanRoot */
+  function recoverSubtree(scanRoot) {
+    if (closed || !admitRel(relative(root, scanRoot))) return;
+    const stranded = findScanBreakingLinks(scanRoot, (rel) => {
+      const abs = join(scanRoot, rel);
+      return !admitRel(relative(root, abs));
+    });
+    if (!stranded.size) {
+      try {
+        watcher?.add(scanRoot);
+      } catch {}
+      return;
+    }
+    for (const [dir, links] of stranded) installFallback(dir, links);
+  }
   // Resolves once the watcher's initial scan completes (chokidar 'ready'), or
   // immediately when watching is disabled — lets callers (tests) wait for a
   // real signal instead of guessing a sleep duration.
   /** @type {(value?: void | PromiseLike<void>) => void} */
   let readyResolve = () => {};
-  const ready = new Promise((res) => {
+  /** @type {(reason?: unknown) => void} */
+  let readyReject = () => {};
+  const ready = new Promise((res, reject) => {
     readyResolve = res;
+    readyReject = reject;
   });
+  // A runtime can be closed before any request awaits readiness (startup
+  // failure/server teardown). Observe that rejection at creation time while
+  // leaving `ready` itself rejected for later awaiters to detect.
+  void ready.catch(() => {});
   if (!watchable) {
     console.error(
       `peruse: fd limit too low (${softFd}) even to scan safely — ` +
@@ -396,49 +640,61 @@ async function createProjectRuntime(root, watchBudget) {
     );
     readyResolve();
   } else {
+    // Every path the scan touches passes through `ignored`, so it doubles as
+    // the scan's heartbeat for the stall watchdog below.
+    let scanActivity = Date.now();
     watcher = chokidar.watch(root, {
       ignoreInitial: true,
       followSymlinks: false,
       ignored: (p, stats) => {
+        scanActivity = Date.now();
         if (stats && !stats.isFile() && !stats.isDirectory()) return true; // sockets, FIFOs, …
         const rel = relative(root, p);
-        if (
-          rel.split("/").includes("node_modules") ||
-          rel.startsWith(".git/objects") ||
-          inIgnoredDir(rel)
-        )
-          return true;
-        if (!admitted.has(rel)) {
-          if (admitted.size >= WATCH_BUDGET) {
-            if (!budgetWarned) {
-              budgetWarned = true;
-              console.error(
-                `peruse: watch budget (${WATCH_BUDGET} paths, from the fd limit) ` +
-                  `reached — live updates disabled for the rest of the tree; gitignore large ` +
-                  `generated directories, raise \`ulimit -n\`, or set PERUSE_WATCH_BUDGET`,
-              );
-            }
-            return true;
-          }
-          admitted.add(rel);
-        }
-        return false;
+        return !admitRel(rel);
       },
     });
-    watcher.on("ready", () => readyResolve());
+    let scanDone = false;
+    watcher.on("ready", () => {
+      scanDone = true;
+      readyResolve();
+    });
     let watchErrors = 0;
     watcher.on("error", (err) => {
       const message = err instanceof Error ? err.message : String(err);
       if (++watchErrors <= 3) console.error(`peruse: watcher: ${message}`);
       else if (watchErrors === 4) console.error("peruse: further watcher errors suppressed");
     });
-    watcher.on("all", (_event, p) => {
-      const rel = relative(root, p);
-      if (!rel) return;
-      if (rel === ".git" || rel.startsWith(".git/")) pendingGit = true;
-      else pendingChanged.add(rel);
-      if (!flushTimer) flushTimer = setTimeout(broadcast, 200);
+    watcher.on("all", (event, p) => {
+      // A late-finishing chokidar scan may overlap a fallback directory. Its
+      // direct entries come from snapshot reconciliation only, so one physical
+      // change cannot become two SSE updates. Descendants remain chokidar's.
+      if (!fallbackWatchers.has(dirname(p))) noteChange(p);
+      if (recoveryActive && event === "addDir") scheduleVerification(p);
     });
+
+    // Stall watchdog. The first request for a project awaits `ready`, so a scan
+    // that never finishes doesn't merely cost live updates — the project serves
+    // nothing at all. A scan-breaking link does exactly that, so an initial scan
+    // that goes quiet without reaching 'ready' is inspected: name any culprit,
+    // watch its directory within the shared budget, and let the server run.
+    // This is a quiet-time heuristic; if a healthy scan is unusually silent,
+    // recovery is idempotent and late chokidar coverage is de-duplicated.
+    const STALL_MS = 3000;
+    stallTimer = setInterval(() => {
+      if (closed || scanDone || Date.now() - scanActivity < STALL_MS) return;
+      if (stallTimer) clearInterval(stallTimer);
+      stallTimer = null;
+      recoveryActive = true;
+      const stranded = findScanBreakingLinks(root, (rel) => !admitRel(rel));
+      for (const [dir, links] of stranded) installFallback(dir, links);
+      if (!stranded.size)
+        console.error(
+          "peruse: the file watcher's initial scan stalled for an unknown reason — " +
+            "live updates may be incomplete; the tree and file contents are unaffected",
+        );
+      readyResolve();
+    }, 1000);
+    stallTimer.unref?.();
   }
   const pingTimer = setInterval(() => {
     for (const c of clients) {
@@ -456,9 +712,20 @@ async function createProjectRuntime(root, watchBudget) {
     clients,
     rememberIgnored,
     ready,
+    get closed() {
+      return closed;
+    },
     async close() {
+      if (!closed) {
+        closed = true;
+        readyReject(new RuntimeClosedError());
+      }
       clearInterval(pingTimer);
+      if (stallTimer) clearInterval(stallTimer);
       if (flushTimer) clearTimeout(flushTimer);
+      for (const timer of reconcileTimers.values()) clearTimeout(timer);
+      for (const timer of verifyTimers.values()) clearTimeout(timer);
+      for (const handle of fallbackWatchers.values()) handle.close();
       await watcher?.close();
     },
   };
@@ -501,7 +768,17 @@ export async function startServer({
       runtime = await createProjectRuntime(target.path, watchBudget);
       runtimes.set(routeName, runtime);
     }
-    await runtime.ready;
+    try {
+      await runtime.ready;
+    } catch (error) {
+      if (!(error instanceof RuntimeClosedError)) throw error;
+      if (runtimes.get(routeName) === runtime) runtimes.delete(routeName);
+      return null;
+    }
+    if (runtime.closed) {
+      if (runtimes.get(routeName) === runtime) runtimes.delete(routeName);
+      return null;
+    }
     return { target, runtime };
   }
 
