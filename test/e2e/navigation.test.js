@@ -8,8 +8,9 @@ import { expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { chromium } from "playwright-core";
+
 import { startServer } from "../../server/index.js";
+import { launchBrowser } from "../fixture.js";
 
 const T = 60_000;
 
@@ -32,14 +33,10 @@ test(
         portFixed: true,
         watchBudget: 100,
       });
-      await srv.ready;
-      browser = await chromium.launch({
-        executablePath: process.env.PERUSE_CHROMIUM || undefined,
-        args: ["--no-sandbox"],
-      });
+      browser = await launchBrowser();
       const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
       page.on("pageerror", (error) => pageErrors.push(error.message));
-      await page.goto(`http://127.0.0.1:${srv.port}/#/docs/guide.md`);
+      await page.goto(`http://127.0.0.1:${srv.port}/p/project/#/docs/guide.md`);
       await page.waitForFunction(
         () => document.querySelector("#pane-header .path")?.textContent === "docs/guide.md",
       );

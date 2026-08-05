@@ -21,7 +21,7 @@
     "check": "bun run lint && bun run typecheck",
     "start": "bun run bin/peruse.js",
     "test": "bun test test/unit test/integration",
-    "test:e2e": "bun run build && bun test test/e2e",
+    "test:e2e": "bun run build && bun test test/e2e/project-switcher.test.js && bun test test/e2e/core.test.js test/e2e/navigation.test.js test/e2e/sanitize.test.js",
     "test:all": "bun run test && bun run test:e2e",
     "prepublishOnly": "bun run build"
   },

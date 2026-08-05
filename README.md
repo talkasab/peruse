@@ -24,19 +24,30 @@ and the survey of existing tools.
 
 ```bash
 cd some/directory
-bunx @talkasab/peruse        # → http://127.0.0.1:7440
+bunx @talkasab/peruse .      # registers this directory and prints its project URL
 ```
 
 ```
-peruse [path] [--port 7440] [--host 127.0.0.1] [--no-open]
+peruse [path] [--port 7440] [--host 127.0.0.1]
+peruse add <path> | rm <name-or-path> | list | prune
 ```
+
+peruse prints URLs and never opens a browser — its home use case is browsing
+a remote machine's files (SSH into the box, click the printed link locally).
+
+Opened paths are remembered in `~/.config/peruse/projects.json`. Running
+`peruse` without a path opens a landing page for all registered projects;
+each project has a shareable `/p/<name>/` URL and linked Git worktrees appear
+under it automatically. Missing paths stay visible for 30 days unless removed
+with `peruse prune`.
 
 If the default port is busy, peruse walks forward to the next free one
 (7441, 7442, …). A port given explicitly with `--port` is used as-is, or
 fails if taken.
 
-peruse is read-only: it never modifies the directory it serves, and it binds
-to localhost only by default.
+peruse is read-only with respect to every directory it serves. Its only
+persistent application data is the project registry under
+`~/.config/peruse/`, and it binds to localhost only by default.
 
 ### Browsing from other machines (LAN / Tailscale)
 
@@ -59,11 +70,11 @@ is tracked in issue #21.)
 
 ## Design at a glance
 
-A ~5-route Bun server (`Bun.serve`, one dependency: chokidar) plus a single
-static page that composes best-in-class libraries — markdown-it, Shiki,
-diff2html, Alpine.js — bundled at publish time with `bun build`. The
-current system is described in [ARCHITECTURE.md](ARCHITECTURE.md); the
-original reasoning is preserved in
+A multi-root Bun server (`Bun.serve`, one dependency: chokidar) plus a single
+static client that composes markdown-it, Shiki, diff2html, and Alpine.js,
+bundled at publish time with `bun build`. Watchers are created lazily for
+projects that are actually opened. The current system is described in
+[ARCHITECTURE.md](ARCHITECTURE.md); the original reasoning is preserved in
 [docs/design-history.md](docs/design-history.md).
 
 ## Development

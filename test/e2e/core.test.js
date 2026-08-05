@@ -4,8 +4,8 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { appendFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { chromium } from "playwright-core";
-import { makeFixtureRepo, startFixtureServer } from "../fixture.js";
+
+import { launchBrowser, makeFixtureRepo, startFixtureServer } from "../fixture.js";
 
 let srv, root, browser, page;
 const T = 30_000;
@@ -17,16 +17,18 @@ let pageErrors = [];
 beforeAll(async () => {
   root = makeFixtureRepo();
   srv = await startFixtureServer(root, 7561); // fixture defaults to a generous watch budget
-  browser = await chromium.launch({
-    executablePath: process.env.PERUSE_CHROMIUM || undefined,
-    args: ["--no-sandbox"],
-  });
+  browser = await launchBrowser();
   page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
   page.on("pageerror", (e) => pageErrors.push(e.message));
 }, 60_000);
 afterAll(async () => {
-  await browser?.close();
-  await srv?.cleanup();
+  // Best-effort teardown, bounded under the 5 s hook timeout: a Bun-stalled
+  // browser.close() (or a wedged watcher close) must not fail an otherwise
+  // green run — process exit reaps the browser and server either way.
+  await Promise.race([
+    Promise.allSettled([browser?.close(), srv?.cleanup()]),
+    new Promise((resolve) => setTimeout(resolve, 3500)),
+  ]);
 });
 afterEach(() => {
   // finally: a failing expect throws, and without the reset one page error
@@ -47,6 +49,26 @@ const openFile = async (path) => {
 };
 
 describe("smoke", () => {
+  // Own page, not the shared journeys tab: inserting the landing page's
+  // extra cross-document hop into the shared tab destabilized the whole file
+  // under Bun's Playwright pipe transport (10/10 clean without it vs ~1-in-3
+  // failing runs with it; see the launchBrowser note in fixture.js).
+  test(
+    "landing page lists the registered project",
+    async () => {
+      const landing = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+      try {
+        await landing.goto(srv.origin);
+        await landing.waitForSelector(".project-card");
+        expect(await landing.locator(".project-name").innerText()).toBe(srv.project.name);
+        expect(await landing.locator(".project-summary").innerText()).toContain("change");
+      } finally {
+        await landing.close();
+      }
+    },
+    T,
+  );
+
   // The job here is booting without a pageerror (checked by the global
   // afterEach); status/dirty-dot/dim presence is exercised properly, with
   // real content assertions, by the journeys below.
@@ -56,6 +78,8 @@ describe("smoke", () => {
       await page.goto(srv.base);
       await page.waitForSelector("#tree .row");
       expect(await page.locator("#tree .row").count()).toBeGreaterThan(0);
+      expect(await page.locator(".project-switcher option").count()).toBe(1);
+      expect(await page.locator(".project-switcher").inputValue()).toBe(srv.project.name);
     },
     T,
   );

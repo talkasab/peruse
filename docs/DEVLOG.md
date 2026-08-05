@@ -4,6 +4,136 @@ Narrative record of work sessions — what changed, what we learned, and why.
 Newest first. (The [CHANGELOG](../CHANGELOG.md) is the user-facing summary;
 this is the engineering story.)
 
+## 2026-08-05 — Multi-root code-review hardening
+
+- Registered roots that still exist as non-directories were reaching Git as a
+  working directory and throwing `ENOTDIR`, which could prevent enumeration of
+  every healthy project. Git-facing discovery and summaries now require a
+  directory and report other filesystem entries as missing; the same check is
+  used for discovered worktree targets.
+- `peruse rm` now treats an exact registered name as the selector mode and only
+  falls back to path matching when no name matches. Path selectors use the same
+  realpath canonicalization as registration, so the symlink spelling used to
+  add a project also removes its canonical registry entry.
+- Three focused unit regressions failed with the reported `ENOTDIR`, 2-vs-1
+  removal, and 0-vs-1 symlink-removal results before the fix, then passed after
+  it. `bun run check` passed. The repository's isolated `test:e2e` pipeline
+  passed all 11 browser tests; two exact all-in-one `bun test` runs passed every
+  unit/integration test but each hit the already documented Bun/Playwright
+  combined-process stall in a different browser test (75/78, then 77/78).
+
+## 2026-08-05 — Auto-open removed entirely (owner decision)
+
+- Yesterday's opener fix stopped a missing `xdg-open` from killing the server,
+  but the owner's reaction to the resulting warning reframed the question:
+  peruse's home use case is *remote* — SSH into the machine with the files,
+  click the printed URL in a local browser. A browser opened on the server
+  host would be useless even where it's possible. v1's auto-open (and
+  `--no-open`) assumed a local-viewer model that doesn't match how the tool
+  is actually used, and nothing has shipped, so both are gone rather than
+  deprecated: the CLI prints URLs, full stop.
+- With no opener code path, the empty-`PATH` CLI regression lost its subject
+  and was removed with it.
+
+## 2026-08-04 — E2E destabilization hunt: one real bug, one Bun bug
+
+After #3 landed in the working tree, the previously rock-solid e2e suite began
+failing most full runs with 30-second Playwright timeouts (`goto`, clicks
+"not stable", `waitForFunction` never satisfied) that moved between tests on
+every run, while every failing test passed in isolation. A control run of the
+pre-#3 tree in the same environment was 4/4 green, so the change — not the
+machine — was implicated. Instrumenting the server (request ledger), the
+client (init-milestone console probes), and the tests (console/pageerror
+forwarding) repeatedly showed the same paradox: server ledger complete in
+milliseconds, page console proving init finished — and Playwright blind to
+all of it.
+
+Two genuine causes fell out, plus a graveyard of falsified theories:
+
+- **Real regression #1 (product): peruse's git polling wrote `.git/index`.**
+  `git status` opportunistically refreshes the index; the watcher forwarded
+  that write as a git-change event; clients responded by re-fetching the tree
+  and open file — whose handlers run `git status` again. Measured 3–5
+  self-inflicted git-change SSE messages per page load; one landed mid-test
+  and detached the element under Playwright's cursor (`boundingBox()` null).
+  Multi-root amplified it (`gitSummary` per project per `/api/projects`), but
+  the write predates #3. Fixed with `--no-optional-locks` on every git
+  invocation — which is also what the read-only contract always demanded.
+  Self-inflicted messages measured zero afterward.
+- **Real trigger #2 (harness): Bun's Playwright pipe transport stalls.**
+  The dominant failure was CDP messages sitting unread while page and server
+  stayed healthy — same family as oven-sh/bun#27977. `connectOverCDP` over a
+  websocket is not an escape hatch (Playwright's ws client never connects
+  under Bun, oven-sh/bun#9911), and once wedged a fresh *page* does not
+  recover — the stall is connection-scoped (a 3-attempt fresh-page retry
+  still timed out). What the suite's shape controls is exposure: the landing
+  test's extra SSE-less hop in core's shared tab (~1 in 3 core-only failures;
+  10/10 green without it, twice over) and the standalone switcher file's
+  fourth per-process browser lifecycle (pre-#3 the suite ran three) were the
+  two reliable tickles. Merging the switcher test into core (own page,
+  shared browser) traded the stall for instant `net::ERR_EMPTY_RESPONSE`
+  from the *fixture* server once a second `Bun.serve` had started in the
+  process — a different Bun soft spot, so that shape was abandoned. Final
+  arrangement, 8/8 full `test:e2e` runs green: the landing test drives its
+  own page; the switcher file runs first in its own `bun test` process
+  (never failed pristine; the `test:e2e` script encodes the split); core's
+  `afterAll` bounds teardown with a race so a Bun-stalled `browser.close()`
+  cannot fail an otherwise green run. Browser launching is centralized in
+  `launchBrowser()` (fixture.js) where the caveat is documented.
+- **Falsified along the way** (each by direct experiment): git-spawn churn
+  starving the loop (cached enumeration to ~baseline spawn counts — still
+  failed), lazy-watcher timing (eager runtimes at boot — still failed), a
+  keepalive timer (25 ms interval — still failed), environment drift
+  (baseline green), inotify exhaustion (21 instances of 1M). `DEBUG=
+  pw:protocol` masked the bug entirely — 8/8 green — which is what finally
+  pointed at loop-servicing rather than any of the above.
+- Bare `bun test` (all suites in one process) still wedges occasionally under
+  accumulated multi-file load and is not the supported pipeline; the
+  documented gate remains `bun run test` + `bun run test:e2e` as separate
+  processes, which is what CI-style validation should use.
+
+## 2026-08-04 — Missing browser opener no longer kills the server
+
+- A Linux host without `xdg-open` reproduced a sharp CLI failure: peruse bound
+  successfully and printed its URL, then the optional browser-launch spawn
+  threw `ENOENT` and terminated the whole process.
+- Automatic opening is now best-effort. A synchronous platform-opener failure
+  prints a short warning directing the user to the already printed URL while
+  leaving the server alive; `--no-open` remains available for intentional
+  headless use.
+- A subprocess integration test drives the real CLI with an empty `PATH` and a
+  temporary config directory. It failed before the fix with exit code 1 and
+  now asserts the process remains alive after the serving line appears.
+
+## 2026-08-03 — Multi-root project serving (#3)
+
+- Replaced the single-root server URL model with a persistent registry at
+  `~/.config/peruse/projects.json` and shareable `/p/<encoded-name>/` routes.
+  `peruse <path>` still performs the familiar open-and-serve flow, but now
+  canonicalizes and auto-registers the path; no arguments opens the new project
+  landing page. Added `add`, `rm`, `list`, and explicit `prune` verbs.
+- Missing paths are deliberately soft state: the landing API records a first
+  `missingSince`, renders the entry dimmed, and automatic maintenance waits 30
+  days of continuous absence. Explicit prune is immediate. Tests and embedders
+  use an explicit config file or `PERUSE_CONFIG_DIR`, and every test registry is
+  under a temporary directory.
+- Worktrees are enumerated live from `git worktree list --porcelain`, grouped
+  beneath their registered parent, and assigned transient route names without
+  registry writes. Registered subdirectories map to the same relative
+  subdirectory in linked worktrees rather than exposing the repository root.
+- Server state is isolated per resolved project. Tree/file/raw/SSE endpoints
+  are project-prefixed, ignored-path caches and SSE clients do not cross roots,
+  and chokidar starts lazily on first project access. The landing page alone has
+  no watcher cost.
+- The Alpine client now has explicit landing and project modes, uses scoped API
+  and raw URLs, and renders a grouped project/worktree dropdown on project
+  pages. Existing shared E2E fixtures moved to project-prefixed bases; the two
+  standalone regressions were likewise updated from the old root URL.
+- New tests cover registry canonicalization/reopen/collision behavior,
+  first-miss and aged pruning, immediate prune, porcelain parsing, real linked
+  worktree discovery without registration, encoded project names, scoped
+  routing, and landing missing/summary data.
+
 ## 2026-08-03 — Biome and full-strict JavaScript checking (#16)
 
 - Added Biome 2.5.6 for formatting, recommended lint rules, and import

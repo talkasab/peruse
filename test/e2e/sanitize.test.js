@@ -2,8 +2,9 @@ import { expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { chromium } from "playwright-core";
+
 import { startServer } from "../../server/index.js";
+import { launchBrowser } from "../fixture.js";
 
 const T = 60_000;
 
@@ -49,17 +50,15 @@ def hello(): return 1
         portFixed: true,
         watchBudget: 100,
       });
-      await srv.ready;
-      browser = await chromium.launch({
-        executablePath: process.env.PERUSE_CHROMIUM || undefined,
-        args: ["--no-sandbox"],
-      });
+      browser = await launchBrowser();
       const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
       page.on("pageerror", (error) => pageErrors.push(error.message));
 
       // A new page and full navigation make this independent of the shared-page
       // hashchange race tracked separately from the #23 regression.
-      await page.goto(`http://127.0.0.1:${srv.port}/#/README.md`, { timeout: 15_000 });
+      await page.goto(`http://127.0.0.1:${srv.port}/p/project/#/README.md`, {
+        timeout: 15_000,
+      });
       await page.waitForSelector(".markdown-body", { timeout: 15_000 });
       await page.waitForTimeout(1_500);
 

@@ -4,6 +4,14 @@ import { existsSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import chokidar from "chokidar";
+import {
+  enumerateProjects,
+  gitSummary,
+  observeMissingProjects,
+  pruneProjects,
+  readProjects,
+  registerProject,
+} from "./projects.js";
 
 /**
  * @typedef {object} Hunk
@@ -38,7 +46,9 @@ import chokidar from "chokidar";
 
 /**
  * @typedef {object} StartOptions
- * @property {string} root
+ * @property {string} [root]
+ * @property {string} [configFile]
+ * @property {import("./projects.js").ProjectEntry[]} [projects]
  * @property {number} port
  * @property {string} host
  * @property {boolean} [portFixed]
@@ -73,10 +83,13 @@ const EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 // warnings, advisories) filling an unread 64 KB pipe blocks forever and
 // hangs the request. The timeout bounds any other pathology (dead mounts,
 // index locks); a killed git degrades to "no status" instead of a hang.
+// --no-optional-locks: status must not refresh .git/index — peruse is
+// read-only, and its own index writes echo back through the watcher as
+// git-change events, re-rendering clients that only asked for status.
 /** @param {string} root @param {...string} args */
 async function git(root, ...args) {
   const t0 = Date.now();
-  const proc = Bun.spawn(["git", ...args], {
+  const proc = Bun.spawn(["git", "--no-optional-locks", ...args], {
     cwd: root,
     stdout: "pipe",
     stderr: "ignore",
@@ -276,9 +289,8 @@ export function safePath(root, rel) {
   return { abs, rel: inside };
 }
 
-/** @param {StartOptions} options */
-export async function startServer({ root, port, host, portFixed = false, watchBudget }) {
-  ensureFreshClient();
+/** @param {string} root @param {number | undefined} watchBudget */
+async function createProjectRuntime(root, watchBudget) {
   /** @type {Set<ReadableStreamDefaultController<string>>} */
   const clients = new Set();
   /** @type {Set<string>} */
@@ -439,8 +451,83 @@ export async function startServer({ root, port, host, portFixed = false, watchBu
   }, 30_000);
   pingTimer.unref?.();
 
+  return {
+    root,
+    clients,
+    rememberIgnored,
+    ready,
+    async close() {
+      clearInterval(pingTimer);
+      if (flushTimer) clearTimeout(flushTimer);
+      await watcher?.close();
+    },
+  };
+}
+
+/** @param {StartOptions} options */
+export async function startServer({
+  root,
+  configFile,
+  projects: fixedProjects,
+  port,
+  host,
+  portFixed = false,
+  watchBudget,
+}) {
+  ensureFreshClient();
+  const initialProjects =
+    fixedProjects ??
+    (root
+      ? [
+          {
+            path: root,
+            name: "project",
+            lastOpened: new Date().toISOString(),
+          },
+        ]
+      : null);
+  const registry = () => initialProjects ?? readProjects(configFile);
+  /** @type {Map<string, Awaited<ReturnType<typeof createProjectRuntime>>>} */
+  const runtimes = new Map();
+
+  /** @param {string} routeName */
+  async function resolveProject(routeName) {
+    const targets = await enumerateProjects(registry());
+    const target = targets.find((candidate) => candidate.routeName === routeName);
+    if (!target || target.missing) return null;
+    let runtime = runtimes.get(routeName);
+    if (!runtime || runtime.root !== target.path) {
+      await runtime?.close();
+      runtime = await createProjectRuntime(target.path, watchBudget);
+      runtimes.set(routeName, runtime);
+    }
+    await runtime.ready;
+    return { target, runtime };
+  }
+
   /** @param {unknown} data @param {number} [status] */
   const json = (data, status = 200) => Response.json(data, { status });
+
+  async function projectListing() {
+    const projects = configFile
+      ? pruneProjects({ file: configFile }).kept
+      : (fixedProjects ?? (root ? registry() : observeMissingProjects()));
+    const targets = await enumerateProjects(projects);
+    const activeRoutes = new Set(
+      targets.filter((target) => !target.missing).map((target) => target.routeName),
+    );
+    for (const [routeName, runtime] of runtimes) {
+      if (activeRoutes.has(routeName)) continue;
+      await runtime.close();
+      runtimes.delete(routeName);
+    }
+    return Promise.all(
+      targets.map(async (target) => ({
+        ...target,
+        summary: target.missing ? null : await gitSummary(target.path),
+      })),
+    );
+  }
 
   // Walk forward from the default port if it's taken; a user-pinned --port fails loudly.
   /** @param {number} p */
@@ -456,64 +543,98 @@ export async function startServer({ root, port, host, portFixed = false, watchBu
         const url = new URL(req.url);
         const { pathname } = url;
 
-        if (pathname === "/api/tree") {
-          const t0 = Date.now();
-          const gs = rememberIgnored(await gitStatus(root));
-          const tGit = Date.now();
-          const tree = buildTree(root, gs);
-          if (Date.now() - t0 > 2000)
-            console.error(
-              `peruse: slow /api/tree — git ${tGit - t0} ms, walk ${Date.now() - tGit} ms`,
-            );
-          return json({ root, isRepo: gs.isRepo, tree });
-        }
+        if (pathname === "/api/projects") return json({ projects: await projectListing() });
 
-        if (pathname === "/api/file") {
-          const sp = safePath(root, url.searchParams.get("path") ?? "");
-          if (!sp || !existsSync(sp.abs) || !statSync(sp.abs).isFile())
-            return json({ error: "not found" }, 404);
-          const gs = rememberIgnored(await gitStatus(root));
-          const status = gs.status.get(sp.rel) ?? null;
-          const buf = new Uint8Array(await Bun.file(sp.abs).arrayBuffer());
-          const binary = buf.slice(0, 8192).includes(0);
-          const content = binary ? null : new TextDecoder().decode(buf);
-          return json({
-            path: sp.rel,
-            size: buf.byteLength,
-            binary,
-            status,
-            ignored: gs.ignored.has(sp.rel),
-            content,
-            hunks:
-              gs.isRepo && content !== null
-                ? await fileHunks(root, sp.rel, status, gs.base, content)
-                : [],
-          });
-        }
-
-        if (pathname.startsWith("/raw/")) {
-          const sp = safePath(root, decodeURIComponent(pathname.slice(5)));
-          if (!sp || !existsSync(sp.abs) || !statSync(sp.abs).isFile())
+        const match = pathname.match(/^\/p\/([^/]+)(\/.*)?$/);
+        if (match) {
+          let routeName;
+          try {
+            routeName = decodeURIComponent(match[1]);
+          } catch {
             return new Response("not found", { status: 404 });
-          return new Response(Bun.file(sp.abs));
-        }
+          }
+          const selected = await resolveProject(routeName);
+          if (!selected) return new Response("project not found", { status: 404 });
+          const { target, runtime } = selected;
+          const projectRoot = target.path;
+          const tail = match[2] ?? "/";
 
-        if (pathname === "/api/events") {
-          /** @type {ReadableStreamDefaultController<string> | null} */
-          let ctrl = null;
-          const stream = new ReadableStream({
-            start(c) {
-              ctrl = c;
-              clients.add(c);
-              c.enqueue("retry: 1000\n\n");
-            },
-            cancel() {
-              if (ctrl) clients.delete(ctrl);
-            },
-          });
-          return new Response(stream, {
-            headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-store" },
-          });
+          if (tail === "/") {
+            if (configFile) {
+              const parent =
+                target.kind === "worktree"
+                  ? registry().find((project) => project.name === target.parent)
+                  : registry().find((project) => project.name === target.name);
+              if (parent) registerProject(parent.path, { file: configFile });
+            }
+            const af = join(DIST, "index.html");
+            if (existsSync(af)) return new Response(Bun.file(af));
+            return new Response("peruse: no built client found — run `bun run build`", {
+              status: 500,
+            });
+          }
+
+          if (tail === "/api/tree") {
+            const t0 = Date.now();
+            const gs = runtime.rememberIgnored(await gitStatus(projectRoot));
+            const tGit = Date.now();
+            const tree = buildTree(projectRoot, gs);
+            if (Date.now() - t0 > 2000)
+              console.error(
+                `peruse: slow /api/tree — git ${tGit - t0} ms, walk ${Date.now() - tGit} ms`,
+              );
+            return json({ root: projectRoot, isRepo: gs.isRepo, tree });
+          }
+
+          if (tail === "/api/file") {
+            const sp = safePath(projectRoot, url.searchParams.get("path") ?? "");
+            if (!sp || !existsSync(sp.abs) || !statSync(sp.abs).isFile())
+              return json({ error: "not found" }, 404);
+            const gs = runtime.rememberIgnored(await gitStatus(projectRoot));
+            const status = gs.status.get(sp.rel) ?? null;
+            const buf = new Uint8Array(await Bun.file(sp.abs).arrayBuffer());
+            const binary = buf.slice(0, 8192).includes(0);
+            const content = binary ? null : new TextDecoder().decode(buf);
+            return json({
+              path: sp.rel,
+              size: buf.byteLength,
+              binary,
+              status,
+              ignored: gs.ignored.has(sp.rel),
+              content,
+              hunks:
+                gs.isRepo && content !== null
+                  ? await fileHunks(projectRoot, sp.rel, status, gs.base, content)
+                  : [],
+            });
+          }
+
+          if (tail.startsWith("/raw/")) {
+            const sp = safePath(projectRoot, decodeURIComponent(tail.slice(5)));
+            if (!sp || !existsSync(sp.abs) || !statSync(sp.abs).isFile())
+              return new Response("not found", { status: 404 });
+            return new Response(Bun.file(sp.abs));
+          }
+
+          if (tail === "/api/events") {
+            /** @type {ReadableStreamDefaultController<string> | null} */
+            let ctrl = null;
+            const stream = new ReadableStream({
+              start(c) {
+                ctrl = c;
+                runtime.clients.add(c);
+                c.enqueue("retry: 1000\n\n");
+              },
+              cancel() {
+                if (ctrl) runtime.clients.delete(ctrl);
+              },
+            });
+            return new Response(stream, {
+              headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-store" },
+            });
+          }
+
+          return new Response("not found", { status: 404 });
         }
 
         // Prebuilt client assets
@@ -546,24 +667,20 @@ export async function startServer({ root, port, host, portFixed = false, watchBu
     // A pinned port that's busy (or any other bind failure) throws before we
     // return a stop() handle — close what's already running so the watcher
     // and ping timer don't leak past the failed startServer() call.
-    clearInterval(pingTimer);
-    if (flushTimer) clearTimeout(flushTimer);
-    await watcher?.close();
+    await Promise.all([...runtimes.values()].map((runtime) => runtime.close()));
     throw err;
   }
   // stop() is for tests and embedders; the CLI just exits.
   const stop = async () => {
-    clearInterval(pingTimer);
-    if (flushTimer) clearTimeout(flushTimer);
-    await watcher?.close();
+    await Promise.all([...runtimes.values()].map((runtime) => runtime.close()));
     server.stop(true);
   };
-  return { port: server.port, host, stop, ready };
+  return { port: server.port, host, stop };
 }
 
 // Dev convenience: `bun run server/index.js [path]` serves without the CLI wrapper.
 if (import.meta.main) {
   const root = resolve(process.argv[2] ?? ".");
   const { port } = await startServer({ root, port: 7440, host: "127.0.0.1" });
-  console.log(`peruse (dev) — serving ${root}\n  → http://127.0.0.1:${port}/`);
+  console.log(`peruse (dev) — serving ${root}\n  → http://127.0.0.1:${port}/p/project/`);
 }

@@ -13,8 +13,9 @@ change. Catppuccin Latte/Mocha. It never writes to the directory it serves.
 ## Process shape
 
 ```
-bin/peruse.js         CLI: args, fd-limit re-exec, URL printing, browser open
-server/index.js       Bun.serve: 5 routes + git + chokidar→SSE  (one file)
+bin/peruse.js         CLI: registry verbs, args, fd-limit re-exec, URL printing
+server/projects.js    project registry + live worktrees + landing git summaries
+server/index.js       Bun.serve: multi-root routes + git + lazy chokidar→SSE
 web/{index.html,app.js,style.css}   client source
 dist/                 prebuilt client (bun build; auto-rebuilt when stale)
 ```
@@ -26,7 +27,19 @@ DOMPurify, Alpine.js, @catppuccin/palette) are devDependencies bundled into
 
 ## CLI (`bin/peruse.js`)
 
-`peruse [path] [--port 7440] [--host 127.0.0.1] [--no-open]`
+`peruse [path] [--port 7440] [--host 127.0.0.1]`
+
+`peruse add <path> | rm <name-or-path> | list | prune`
+
+- The registry is a JSON array at `~/.config/peruse/projects.json`; each public
+  entry has `path`, collision-safe `name`, and ISO `lastOpened`. `peruse <path>`
+  canonicalizes and auto-registers the directory, then prints URLs pointing at
+  `/p/<encoded-name>/`. With no path the URLs point at the landing page `/`.
+- Missing projects are retained and shown dimmed. The first observed miss adds
+  an internal `missingSince`; automatic maintenance removes it only after 30
+  days continuously absent. `peruse prune` explicitly removes all currently
+  missing projects immediately. `PERUSE_CONFIG_DIR` overrides the config
+  directory for tests and isolated environments.
 
 - If the soft fd limit is low (<4096), re-execs itself once through `sh`
   with `ulimit -n` raised toward the hard limit (watcher fds; stock macOS
@@ -36,12 +49,16 @@ DOMPurify, Alpine.js, @catppuccin/palette) are devDependencies bundled into
 - Binding `0.0.0.0`/`::` prints every reachable URL (localhost + each
   non-internal IPv4: LAN, Tailscale, …). **No auth** — exposing beyond
   localhost is an explicit opt-in.
+- The CLI never opens a browser (owner decision 2026-08-05): peruse's home
+  use case is remote — the machine running the server is not the machine
+  running the browser. It prints clickable URLs and nothing else.
 
 ## Server (`server/index.js`)
 
-All rendering is client-side; the server serves files, answers git
-questions, and pushes change events. Every request path is resolved under
-the served root (traversal guard); `.git/` is never listed or served.
+All rendering is client-side. One server exposes every registered project at
+`/p/<encoded-name>/`; `/` is the project landing page and `/api/projects`
+returns the landing/switcher model. Every file request is resolved under its
+selected project root (traversal guard); `.git/` is never listed or served.
 Symlinks are followed for file access — deliberately including links whose
 target lies outside the served root (owner decision 2026-07-25;
 characterized in the integration suite; network-mode confinement is issue
@@ -50,11 +67,20 @@ nor directory), but direct paths through them serve normally.
 
 | Endpoint | Returns |
 |---|---|
-| `GET /` + assets | prebuilt client from `dist/` (auto-rebuilt at startup if `web/` is newer — checkout runs only) |
-| `GET /api/tree` | nested JSON tree; per-file git status letter; gitignored flags; per-dir `dirty` flag (any changed descendant); gitignored dirs listed but not walked; ≤500 entries per dir with an inert "… N more" row |
-| `GET /api/file?path=` | text content, size, binary flag, status, hunks |
-| `GET /raw/<path>` | raw bytes, correct MIME (images, markdown assets) |
-| `GET /api/events` | SSE change stream |
+| `GET /` + assets | landing/client bundle from `dist/` (auto-rebuilt at startup if `web/` is newer — checkout runs only) |
+| `GET /api/projects` | registered projects plus live worktrees, missing state, last-opened time, and brief branch/change summary |
+| `GET /p/<name>/` | project viewer client; opening it updates the registered parent's `lastOpened` |
+| `GET /p/<name>/api/tree` | nested JSON tree; per-file git status letter; gitignored flags; per-dir `dirty` flag; ignored dirs listed but not walked; ≤500 entries per dir |
+| `GET /p/<name>/api/file?path=` | text content, size, binary flag, status, hunks |
+| `GET /p/<name>/raw/<path>` | raw bytes, correct MIME (images, markdown assets) |
+| `GET /p/<name>/api/events` | project-scoped SSE change stream |
+
+Worktrees are discovered fresh with `git worktree list --porcelain` whenever
+the project model is requested or a route is resolved. They are grouped under
+their registered parent and receive transient `<parent>:<branch-or-directory>`
+route names; they never enter `projects.json`. If the registered path is below
+the repository root, the equivalent subdirectory is selected in each linked
+worktree, so discovery never broadens the directory the user chose to expose.
 
 ### Git
 
@@ -63,7 +89,11 @@ Plain `git` subprocesses, cwd = served root: `status --porcelain=v2 -z
 --directory` (ignored set, dirs collapsed). Diff base is worktree-vs-`HEAD`
 (empty-tree hash when HEAD is unborn); untracked files diff against
 `/dev/null` via `--no-index`. Non-git directories degrade gracefully
-(no statuses, no hunks, no warning).
+(no statuses, no hunks, no warning). Every invocation passes
+`--no-optional-locks`: without it, `git status` opportunistically rewrites
+`.git/index`, which both violates peruse's read-only contract and echoes
+back through the watcher as a git-change event, re-rendering clients whose
+request triggered the status call in the first place.
 
 ### Hunks
 
@@ -81,7 +111,8 @@ connections, which is fatal for the SSE stream (idle by design, 30 s
 pings) and for slow first responses; the git layer's own 30 s subprocess
 cap provides the real bound.
 
-One chokidar watcher, events coalesced into ~200 ms batches:
+Each project/worktree gets an isolated chokidar watcher only on first access;
+landing-page listing alone starts none. Events are coalesced into ~200 ms batches:
 `{"changed": [paths], "git": bool}` (`.git/*` changes set `git`, are never
 forwarded as file events). Clients re-fetch the tree on any event and
 re-fetch the open file when it changed (preserving scroll + open popup).
@@ -98,16 +129,18 @@ Robustness (each learned from a real failure):
   by tests) takes precedence over both.
 - Below ~1024 fds even the initial scan can starve the process: watching
   is disabled entirely with a clear message instead.
-- `startServer` returns a `ready` promise (resolves on chokidar's initial
-  scan, or immediately if watching is disabled) and closes the watcher and
-  ping timer if startup fails (e.g. a pinned `--port` already in use) rather
-  than leaking them.
+- The first project request waits for that project's lazy watcher's initial
+  scan (or the no-watch fallback) before responding, so an SSE client cannot
+  mutate a file in the gap between connecting and watcher readiness. Server
+  shutdown closes every watcher and ping timer.
 
 ## Client (`web/`)
 
-Alpine.js component; no framework build. State: tree + flattened visible
-rows (depth-annotated), selection via `location.hash` (`#/path`), theme in
-`localStorage` (default `prefers-color-scheme`).
+Alpine.js component; no framework build. At `/`, it renders registered projects
+with path, git summary, last-opened date, dimmed missing state, and grouped live
+worktrees. At `/p/<name>/`, state is tree + flattened visible rows
+(depth-annotated), selection via `location.hash` (`#/path`), a grouped project /
+worktree dropdown in the header, and theme in `localStorage`.
 
 - **Tree**: VS Code explorer conventions — uniform 24 px rows, rotating
   chevrons (only on expandable dirs), folder/file SVG-mask icons, indent
@@ -189,11 +222,11 @@ the suite.
 Regression assertions are tagged with the commit that fixed the incident
 they guard.
 
-- `bun run test` → **unit** (`test/unit/`: parseHunks, withContext, safePath,
-  buildTree, gitStatus porcelain-v2 parsing, web/lib.js helpers, rendered HTML
-  sanitization and compatibility) +
+- `bun run test` → **unit** (`test/unit/`: project registry/pruning/worktree
+  discovery, parseHunks, withContext, safePath, buildTree, gitStatus porcelain-v2
+  parsing, web/lib.js helpers, rendered HTML sanitization and compatibility) +
   **integration** (`test/integration/`: real server + real git over HTTP —
-  tree/file/raw contracts, SSE coalescing and gitignore-skip,
+  encoded multi-root routes, landing data, tree/file/raw contracts, SSE coalescing and gitignore-skip,
   idle-connection survival, port fallback, tiny-watch-budget survival,
   non-git degradation).
 - `bun run test:e2e` → **E2E** (`test/e2e/`): five core Chromium journeys —
@@ -223,7 +256,8 @@ overrides must beat other display/background declarations.
 
 TypeScript checks the production plain ESM JavaScript through JSDoc with
 `allowJs`, `checkJs`, `noEmit`, and full `strict` mode (including
-`noImplicitAny`). The root `tsconfig.json` covers `bin/` and `server/` with Bun
+`noImplicitAny`). The root `tsconfig.json` covers all JavaScript in `bin/` and
+`server/` (including the registry/worktree module) with Bun
 globals; `web/tsconfig.json` covers `web/*.js` with DOM libraries and no Bun
 globals. `web/globals.d.ts` contains declarations only for the two markdown-it
 plugins that do not ship types and the Alpine window global. There is still no

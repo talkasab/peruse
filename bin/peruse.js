@@ -1,9 +1,16 @@
 #!/usr/bin/env bun
 import { existsSync, statSync } from "node:fs";
 import { networkInterfaces } from "node:os";
-// peruse [path] [--port 7440] [--host 127.0.0.1] [--no-open]
+// peruse [path] [--port 7440] [--host 127.0.0.1]
 import { resolve } from "node:path";
 import { startServer } from "../server/index.js";
+import {
+  pruneProjects,
+  readProjects,
+  registerProject,
+  registryPath,
+  removeProject,
+} from "../server/projects.js";
 
 // The watcher costs one fd per watched path, and stock shells (macOS: 256)
 // are far too small for real trees. Re-exec once through sh with the soft
@@ -30,6 +37,10 @@ if (process.platform !== "win32" && !process.env.PERUSE_FDS_RAISED) {
 const HELP = `peruse — lightweight local directory viewer
 
 Usage: peruse [path] [options]
+       peruse add <path>
+       peruse rm <name-or-path>
+       peruse list
+       peruse prune
 
 Options:
   --port <n>    Port to listen on (default 7440, or next free port after it;
@@ -37,15 +48,14 @@ Options:
   --host <h>    Host to bind (default 127.0.0.1; use 0.0.0.0 to allow other
                 machines on your LAN/VPN to browse — peruse has no auth, so
                 anyone who can reach the port can read the served directory)
-  --no-open     Don't open the browser
   --version     Print version
   --help        Show this help`;
 
 const args = process.argv.slice(2);
-let root = ".",
+/** @type {string | null} */
+let root = null,
   port = 7440,
   host = "127.0.0.1",
-  open = true,
   portFixed = false;
 for (let i = 0; i < args.length; i++) {
   const a = args[i];
@@ -60,18 +70,56 @@ for (let i = 0; i < args.length; i++) {
     port = Number(args[++i]);
     portFixed = true;
   } else if (a === "--host") host = args[++i];
-  else if (a === "--no-open") open = false;
-  else if (!a.startsWith("-")) root = a;
+  else if (!a.startsWith("-") && root === null) root = a;
+  else if (["add", "rm"].includes(root ?? "") && i === 1) continue;
   else {
     console.error(`Unknown option: ${a}\n\n${HELP}`);
     process.exit(1);
   }
 }
 
-root = resolve(root);
-if (!existsSync(root) || !statSync(root).isDirectory()) {
-  console.error(`peruse: not a directory: ${root}`);
-  process.exit(1);
+const configFile = registryPath();
+if (root === "add") {
+  const path = resolve(args[1] ?? ".");
+  if (!existsSync(path) || !statSync(path).isDirectory()) {
+    console.error(`peruse: not a directory: ${path}`);
+    process.exit(1);
+  }
+  const project = registerProject(path, { file: configFile });
+  console.log(`${project.name}\t${project.path}`);
+  process.exit(0);
+}
+if (root === "rm") {
+  const selector = args[1];
+  if (!selector) {
+    console.error("peruse: rm requires a project name or path");
+    process.exit(1);
+  }
+  const removed = removeProject(selector, configFile);
+  if (!removed) {
+    console.error(`peruse: project not found: ${selector}`);
+    process.exit(1);
+  }
+  console.log(`removed ${selector}`);
+  process.exit(0);
+}
+if (root === "list") {
+  for (const project of readProjects(configFile))
+    console.log(`${project.name}\t${project.path}\t${project.lastOpened}`);
+  process.exit(0);
+}
+if (root === "prune") {
+  const { removed } = pruneProjects({ file: configFile, immediate: true });
+  for (const project of removed) console.log(`removed ${project.name}\t${project.path}`);
+  if (!removed.length) console.log("no missing projects");
+  process.exit(0);
+}
+if (root !== null) {
+  root = resolve(root);
+  if (!existsSync(root) || !statSync(root).isDirectory()) {
+    console.error(`peruse: not a directory: ${root}`);
+    process.exit(1);
+  }
 }
 if (!Number.isInteger(port) || port < 0 || port > 65535) {
   console.error(`peruse: invalid port`);
@@ -79,8 +127,9 @@ if (!Number.isInteger(port) || port < 0 || port > 65535) {
 }
 
 let started;
+const selected = root ? registerProject(root, { file: configFile }) : null;
 try {
-  started = await startServer({ root, port, host, portFixed });
+  started = await startServer({ configFile, port, host, portFixed });
 } catch (err) {
   const addressInUse =
     typeof err === "object" && err !== null && "code" in err && err.code === "EADDRINUSE";
@@ -94,21 +143,19 @@ try {
 // (LAN, Tailscale, …) — "http://0.0.0.0" itself is not a usable URL.
 const urls = [];
 if (host === "0.0.0.0" || host === "::") {
-  urls.push(`http://127.0.0.1:${started.port}/`);
+  urls.push(`http://127.0.0.1:${started.port}`);
   for (const addrs of Object.values(networkInterfaces()))
     for (const a of addrs ?? [])
-      if (a.family === "IPv4" && !a.internal) urls.push(`http://${a.address}:${started.port}/`);
+      if (a.family === "IPv4" && !a.internal) urls.push(`http://${a.address}:${started.port}`);
 } else {
-  urls.push(`http://${host}:${started.port}/`);
+  urls.push(`http://${host}:${started.port}`);
 }
-console.log(`peruse — serving ${root}\n${urls.map((u) => `  → ${u}`).join("\n")}`);
-if (open) {
-  const url = urls[0];
-  const cmd =
-    process.platform === "darwin"
-      ? ["open", url]
-      : process.platform === "win32"
-        ? ["cmd", "/c", "start", "", url]
-        : ["xdg-open", url];
-  Bun.spawn(cmd, { stdout: "ignore", stderr: "ignore" }).unref();
-}
+// No auto-open, deliberately (owner decision 2026-08-05): peruse's home
+// use case is remote — the server host is not where the browser lives, so
+// spawning one here would be useless at best. The URLs are the product.
+const destination = selected ? `/p/${encodeURIComponent(selected.name)}/` : "/";
+const destinationUrls = urls.map((url) => `${url}${destination}`);
+console.log(
+  `peruse — serving ${readProjects(configFile).length} project(s)\n` +
+    destinationUrls.map((url) => `  → ${url}`).join("\n"),
+);

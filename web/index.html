@@ -12,19 +12,67 @@
 </head>
 <body x-data="peruse" x-cloak>
   <header>
-    <span class="brand">peruse</span>
-    <span class="root" x-text="rootLabel" :title="root"></span>
+    <a class="brand" href="/">peruse</a>
+    <select class="project-switcher" x-show="projectName"
+            @change="switchProject($event.target.value)" aria-label="Switch project">
+      <template x-for="project in registeredProjects" :key="project.routeName">
+        <optgroup :label="project.name">
+          <option :value="project.routeName" :selected="project.routeName === projectName"
+                  :disabled="project.missing"
+                  x-text="project.name"></option>
+          <template x-for="worktree in worktreesFor(project)" :key="worktree.routeName">
+            <option :value="worktree.routeName" :selected="worktree.routeName === projectName"
+                    :disabled="worktree.missing"
+                    x-text="`↳ ${worktree.name}`"></option>
+          </template>
+        </optgroup>
+      </template>
+    </select>
+    <span class="root" x-show="projectName" x-text="rootLabel" :title="root"></span>
     <span class="spacer"></span>
-    <label class="toggle" x-show="isRepo">
+    <label class="toggle" x-show="projectName && isRepo">
       <input type="checkbox" x-model="changedOnly"> changed only
     </label>
-    <button type="button" class="chip" @click="showIgnored = !showIgnored"
+    <button type="button" class="chip" x-show="projectName" @click="showIgnored = !showIgnored"
             x-text="showIgnored ? 'hide ignored' : 'show ignored'"></button>
     <button type="button" class="chip theme-btn" @click="toggleTheme()"
             x-text="theme === 'mocha' ? '☀' : '☾'" title="Toggle theme"></button>
   </header>
 
-  <main>
+  <section class="landing" x-show="!projectName">
+    <div class="landing-intro">
+      <p class="eyebrow">Project library</p>
+      <h1>What would you like to peruse?</h1>
+      <p>Projects you open with <code>peruse &lt;path&gt;</code> appear here automatically.</p>
+    </div>
+    <div class="project-list">
+      <template x-for="project in registeredProjects" :key="project.routeName">
+        <article class="project-card" :class="{ missing: project.missing }">
+          <a href="/" :href="project.missing ? '/' : projectHref(project.routeName)"
+             @click="project.missing && $event.preventDefault()" class="project-primary">
+            <span class="project-name" x-text="project.name">Project</span>
+            <span class="project-summary" x-text="summaryLabel(project)"></span>
+            <span class="project-path" x-text="project.path"></span>
+            <span class="project-opened" x-text="`opened ${formatOpened(project.lastOpened)}`"></span>
+          </a>
+          <div class="worktree-list" x-show="worktreesFor(project).length">
+            <template x-for="worktree in worktreesFor(project)" :key="worktree.routeName">
+              <a class="worktree-row" href="/" :href="projectHref(worktree.routeName)">
+                <span x-text="worktree.name">Worktree</span>
+                <span x-text="summaryLabel(worktree)"></span>
+                <span x-text="worktree.path"></span>
+              </a>
+            </template>
+          </div>
+        </article>
+      </template>
+      <div class="landing-empty" x-show="registeredProjects.length === 0">
+        No projects yet. Run <code>peruse &lt;path&gt;</code> or <code>peruse add &lt;path&gt;</code>.
+      </div>
+    </div>
+  </section>
+
+  <main x-show="projectName">
     <nav id="tree">
       <template x-for="row in rows" :key="row.path">
         <div class="row"

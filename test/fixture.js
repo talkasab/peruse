@@ -10,7 +10,20 @@
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { chromium } from "playwright-core";
 import { startServer } from "../server/index.js";
+import { registerProject, registryPath } from "../server/projects.js";
+
+// Shared Chromium launcher for the e2e files. Kept in one place because the
+// transport is a known Bun soft spot (Playwright drives chromium over extra
+// stdio pipes; oven-sh/bun#27977 family) — connectOverCDP is NOT a viable
+// alternative under Bun (its ws client never connects, oven-sh/bun#9911).
+export function launchBrowser() {
+  return chromium.launch({
+    executablePath: process.env.PERUSE_CHROMIUM || undefined,
+    args: ["--no-sandbox"],
+  });
+}
 
 function sh(cwd, ...cmd) {
   const r = Bun.spawnSync(cmd, { cwd, stdout: "pipe", stderr: "pipe" });
@@ -146,17 +159,24 @@ export async function startFixtureServer(root, port, opts = {}) {
   // watchBudget option takes precedence over the fd-derived default without
   // touching process.env (which would race if tests ever ran in parallel).
   const { budget, ...rest } = opts;
+  const configDir = mkdtempSync(join(tmpdir(), "peruse-config-"));
+  const configFile = registryPath(configDir);
+  const project = registerProject(root, { file: configFile });
   const srv = await startServer({
-    root,
+    configFile,
     port,
     host: "127.0.0.1",
     watchBudget: budget ?? 5000,
     ...rest,
   });
-  const base = `http://127.0.0.1:${srv.port}`;
+  const origin = `http://127.0.0.1:${srv.port}`;
+  const base = `${origin}/p/${encodeURIComponent(project.name)}`;
   return {
     ...srv,
     base,
+    origin,
+    configFile,
+    project,
     async json(path) {
       const r = await fetch(base + path);
       return { status: r.status, body: r.status === 200 ? await r.json() : null };
@@ -165,6 +185,7 @@ export async function startFixtureServer(root, port, opts = {}) {
       await srv.stop();
       rmSync(root, { recursive: true, force: true });
       rmSync(`${root}-outside`, { recursive: true, force: true });
+      rmSync(configDir, { recursive: true, force: true });
     },
   };
 }

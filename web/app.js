@@ -90,12 +90,27 @@ import { createHTMLSanitizer } from "./sanitize.js";
 /** @typedef {"unified" | "split"} DiffMode */
 /** @typedef {{start: number, mode: DiffMode}} PanelState */
 /** @typedef {{changed: string[], git: boolean}} ChangeEvent */
+/**
+ * @typedef {object} ProjectView
+ * @property {string} path
+ * @property {string} name
+ * @property {string} routeName
+ * @property {string} lastOpened
+ * @property {boolean} missing
+ * @property {"project" | "worktree"} kind
+ * @property {string} [parent]
+ * @property {string} [branch]
+ * @property {{branch: string, changes: number} | null} summary
+ */
 
 const GUTTER_PX = 64;
 const MAX_HL_SIZE = 1_000_000,
   MAX_HL_LINES = 10_000;
 const IMG_EXTS = new Set(["png", "jpg", "jpeg", "gif", "webp", "ico", "avif", "bmp"]);
 const sanitizeHTML = createHTMLSanitizer(window);
+const routeMatch = location.pathname.match(/^\/p\/([^/]+)\/?$/);
+const projectName = routeMatch ? decodeURIComponent(routeMatch[1]) : null;
+const projectBase = projectName ? `/p/${encodeURIComponent(projectName)}` : "";
 
 const highlighter = await createHighlighterCore({
   themes: [latte, mocha],
@@ -220,12 +235,19 @@ Alpine.data("peruse", () => ({
   loadingName: "",
   nav: 0,
   wanted: /** @type {string | null} */ (null),
+  projects: /** @type {ProjectView[]} */ ([]),
+  projectName,
 
   async init() {
     this.theme =
       localStorage.getItem("peruse-theme") ??
       (matchMedia("(prefers-color-scheme: dark)").matches ? "mocha" : "latte");
     this.applyTheme();
+    const listing = /** @type {{projects: ProjectView[]}} */ (
+      await (await fetch("/api/projects")).json()
+    );
+    this.projects = listing.projects;
+    if (!this.projectName) return;
     this.$refs.viewer.addEventListener("click", (e) => this.viewerClick(e));
     // reflow (pane resize, images loading) moves blocks → re-lay the rail
     new ResizeObserver(() => this.layoutRails()).observe(this.$refs.viewer);
@@ -251,6 +273,34 @@ Alpine.data("peruse", () => ({
   get rootLabel() {
     return this.root.split("/").filter(Boolean).slice(-2).join("/");
   },
+  get registeredProjects() {
+    return this.projects.filter((project) => project.kind === "project");
+  },
+  /** @param {ProjectView} project */
+  worktreesFor(project) {
+    return this.projects.filter(
+      (candidate) => candidate.kind === "worktree" && candidate.parent === project.name,
+    );
+  },
+  /** @param {string} routeName */
+  projectHref(routeName) {
+    return `/p/${encodeURIComponent(routeName)}/`;
+  },
+  /** @param {string} routeName */
+  switchProject(routeName) {
+    if (routeName && routeName !== this.projectName) location.href = this.projectHref(routeName);
+  },
+  /** @param {string} value */
+  formatOpened(value) {
+    return new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(new Date(value));
+  },
+  /** @param {ProjectView} project */
+  summaryLabel(project) {
+    if (project.missing) return "missing";
+    if (!project.summary) return "not a git repository";
+    const count = project.summary.changes;
+    return `${project.summary.branch} · ${count} change${count === 1 ? "" : "s"}`;
+  },
   get rows() {
     /** @type {Array<TreeNode & {depth: number}>} */
     const out = [];
@@ -272,7 +322,7 @@ Alpine.data("peruse", () => ({
   },
   async refreshTree() {
     const d = /** @type {{tree: TreeNode[], isRepo: boolean, root: string}} */ (
-      await (await fetch("/api/tree")).json()
+      await (await fetch(`${projectBase}/api/tree`)).json()
     );
     this.tree = d.tree;
     this.isRepo = d.isRepo;
@@ -326,7 +376,7 @@ Alpine.data("peruse", () => ({
     const superseded = () => nav !== this.nav || (preserve && this.wanted !== path);
     this.loadingName = path.split("/").pop() ?? "";
     if (!preserve) this.loading = true;
-    const r = await fetch(`/api/file?path=${encodeURIComponent(path)}`);
+    const r = await fetch(`${projectBase}/api/file?path=${encodeURIComponent(path)}`);
     if (superseded()) return;
     if (!r.ok) {
       this.file = null;
@@ -361,13 +411,13 @@ Alpine.data("peruse", () => ({
     if (!f) return;
     const ext = f.path.split(".").pop()?.toLowerCase() ?? "";
     if (f.binary && IMG_EXTS.has(ext)) {
-      v.innerHTML = `<div class="image-view"><img src="/raw/${escAttr(f.path)}"></div>`;
+      v.innerHTML = `<div class="image-view"><img src="${projectBase}/raw/${escAttr(f.path)}"></div>`;
     } else if (f.binary) {
       v.innerHTML =
         `<div class="file-card"><div class="fc-name">${esc(f.path)}</div>` +
         `<div class="fc-meta">binary file · ${fmtSize(f.size)}` +
         `${f.status ? ` · git: ${f.status}` : ""}</div>` +
-        `<a class="chip" href="/raw/${escAttr(f.path)}" download>Download</a></div>`;
+        `<a class="chip" href="${projectBase}/raw/${escAttr(f.path)}" download>Download</a></div>`;
     } else if (this.isMarkdown && !this.raw) {
       this.renderMarkdown(v, f);
     } else {
@@ -415,7 +465,7 @@ Alpine.data("peruse", () => ({
       const img = /** @type {HTMLImageElement} */ (element);
       const src = img.getAttribute("src");
       if (src && !/^([a-z][a-z0-9+.-]*:|\/|#|data:)/i.test(src))
-        img.src = `/raw/${resolveRel(dir, src)}`;
+        img.src = `${projectBase}/raw/${resolveRel(dir, src)}`;
     }
     for (const element of v.querySelectorAll("a[href]")) {
       const a = /** @type {HTMLAnchorElement} */ (element);
@@ -632,7 +682,7 @@ Alpine.data("peruse", () => ({
 
   // ---- live updates ----
   connect() {
-    const es = new EventSource("/api/events");
+    const es = new EventSource(`${projectBase}/api/events`);
     es.onmessage = (ev) => {
       const d = /** @type {ChangeEvent} */ (JSON.parse(ev.data));
       this.refreshTree();

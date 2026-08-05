@@ -7,7 +7,6 @@ let srv, root;
 beforeAll(async () => {
   root = makeFixtureRepo();
   srv = await startFixtureServer(root, 7531);
-  await srv.ready; // wait for the real signal (chokidar's initial scan), not a guessed sleep
 });
 afterAll(async () => {
   await srv?.cleanup();

@@ -12,6 +12,13 @@ date and becomes the GitHub release notes (see
 ## [Unreleased]
 
 ### Fixed
+- Registered project roots replaced by files no longer break the project list,
+  and `peruse rm` now removes exactly one name-or-canonical-path selection,
+  including projects registered through symlinks
+- peruse's own git status polling no longer writes to `.git/index`
+  (`--no-optional-locks`), which had made the live view re-render spuriously
+  right after opening a page — peruse now never writes inside a served
+  directory, `.git` included
 - Opening a file no longer snaps back to the previous file when a live update
   arrives at the same moment (#26)
 - Rendered Markdown now removes executable HTML and Alpine directives while
@@ -22,6 +29,10 @@ date and becomes the GitHub release notes (see
   scrolled down) (#14)
 
 ### Added
+- Multi-project serving with an auto-maintained project registry, `add`, `rm`,
+  `list`, and `prune` CLI commands, a project landing page, shareable
+  `/p/<name>/` URLs, live grouped Git worktrees, a header project switcher, and
+  project-scoped lazy file watching (#3)
 - v1 of peruse: two-column directory browser (tree + rendered file) served
   by a ~5-route Bun server; GFM markdown (markdown-it) and code (Shiki,
   Catppuccin dual-theme) rendering; git status in the tree with a
