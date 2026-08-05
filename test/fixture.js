@@ -209,6 +209,21 @@ https://example.com/${"unbreakable-token-".repeat(20)}end
 tail line
 `;
 
+// Combined #18 + #25 subject: a committed-clean mdsvex file whose prose line
+// wraps, proving the wrap toggle operates on grammar-highlighted .svx output.
+export const WIDE_SVX = `---
+title: Wide
+---
+
+<script>
+  export let x = 1;
+</script>
+
+# Wide {x}
+
+${"an mdsvex prose line that should soft wrap when the toggle is on ".repeat(12).trimEnd()}
+`;
+
 export const LONG_SCROLL_TEXT = Array.from(
   { length: 260 },
   (_, i) =>
@@ -262,6 +277,7 @@ export function makeFixtureRepo() {
   writeFileSync(join(dir, "docs/over-limit-unterminated.svx"), SVX_OVER_LIMIT_UNTERMINATED);
   writeFileSync(join(dir, "README.md"), "# Fixture\n\nSee [the guide](docs/guide.md).\n");
   writeFileSync(join(dir, "docs/wide.txt"), WIDE_TEXT);
+  writeFileSync(join(dir, "docs/wide.svx"), WIDE_SVX);
   writeFileSync(join(dir, "docs/long-scroll.txt"), LONG_SCROLL_TEXT);
   writeFileSync(join(dir, "docs/short.txt"), SHORT_TEXT);
   writeFileSync(join(dir, "docs/single-long.txt"), SINGLE_LONG_TEXT);

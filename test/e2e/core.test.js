@@ -496,6 +496,33 @@ describe("word wrap (#25)", () => {
   const sharedLines = (before, after) =>
     before.visible.filter((line) => after.visible.includes(line));
 
+  test("wraps grammar-highlighted .svx source (#18 + #25)", async () => {
+    await openFile("docs/wide.svx");
+    const measure = () =>
+      page.evaluate(() => {
+        const pre = document.querySelector(".shiki");
+        const line = [...document.querySelectorAll(".shiki > code > .line")].find(
+          (l) => l.textContent.length > 200,
+        );
+        const lineHeight = Number.parseFloat(getComputedStyle(line).lineHeight);
+        return {
+          tokens: pre.querySelectorAll(".line > span").length,
+          rows: Math.round(line.offsetHeight / lineHeight),
+          overflow: pre.scrollWidth > pre.clientWidth,
+        };
+      });
+    const before = await measure();
+    expect(before.tokens).toBeGreaterThan(0); // mdsvex grammar, not the plain fallback
+    expect(before.rows).toBe(1);
+    expect(before.overflow).toBe(true);
+    await setWrap(true);
+    const after = await measure();
+    expect(after.tokens).toBe(before.tokens);
+    expect(after.rows).toBeGreaterThan(1);
+    expect(after.overflow).toBe(false);
+    await setWrap(false);
+  });
+
   // Per-line geometry inside a <pre class="shiki">. Heights are expressed in
   // line-height units (rows) so the assertions don't depend on the host's
   // monospace metrics, and `lefts` groups the range's per-token rects by their

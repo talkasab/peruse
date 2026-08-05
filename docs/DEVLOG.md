@@ -4,6 +4,33 @@ Narrative record of work sessions — what changed, what we learned, and why.
 Newest first. (The [CHANGELOG](../CHANGELOG.md) is the user-facing summary;
 this is the engineering story.)
 
+## 2026-08-05 (integration) — Four-branch batch merged: #17, #28, #18, #25
+
+- Landed in the order #17 → #28 → #18 → #25, chosen so the watcher branch's
+  readiness contract (`RuntimeClosedError` on close) was on main before the
+  enumeration cache's invalidation paths began closing runtimes. The order and
+  every conflict resolution were rehearsed beforehand with real three-way
+  merges in a scratch tree.
+- The `server/index.js` composition was the only judgment-laden resolution:
+  one `closed` state (the rebase initially left two declarations — caught by
+  Biome exactly as the rehearsal predicted), #17's `readyReject` as the first
+  transition inside #28's memoized `closePromise`, and `resolveProject()`
+  keeping #17's typed catch ahead of #28's combined post-success guard, with
+  the typed-error path routed through the tracked `closeRuntime` helper.
+- `renderCode()` keeps #25's `wrapAvailable` and #18's `plainFallback(f)` —
+  reverting to the generic size expression would have silently dropped the
+  .svx 3,500-line ceiling.
+- Added `test/integration/composed-lifecycle.test.js` for the scenarios that
+  can only exist with both server branches present: route invalidation
+  settling a scan-broken runtime's pending readiness, runtime-level startup
+  coalescing across cold and post-invalidation waves, and SSE EOF when a
+  fallback-recovered runtime is invalidated. Plus one combined e2e case:
+  the wrap toggle operating on grammar-highlighted `.svx` output.
+- Every branch had been through adversarial review/fix cycles (two independent
+  reviewer sessions; 40+ confirmed findings fixed across the batch) before
+  merging; the full merged tree passes check, 144 unit/integration tests, and
+  27 browser tests.
+
 ## 2026-08-05 — Word wrap toggle (#25)
 
 - Wrapping is entirely CSS off a `data-wrap` attribute on `#viewer`: `hlCode()`,
