@@ -105,7 +105,6 @@ import { createHTMLSanitizer } from "./sanitize.js";
  * @property {{branch: string, changes: number} | null} summary
  */
 
-const GUTTER_PX = 64;
 const MAX_HL_SIZE = 1_000_000,
   MAX_HL_LINES = 10_000,
   MAX_SVX_HL_LINES = 3500;
@@ -241,6 +240,8 @@ Alpine.data("peruse", () => ({
   showIgnored: true,
   file: /** @type {FileData | null} */ (null),
   raw: false,
+  wrap: false,
+  wrapAvailable: false,
   theme: "latte",
   loading: false,
   loadingName: "",
@@ -254,6 +255,7 @@ Alpine.data("peruse", () => ({
       localStorage.getItem("peruse-theme") ??
       (matchMedia("(prefers-color-scheme: dark)").matches ? "mocha" : "latte");
     this.applyTheme();
+    this.wrap = localStorage.getItem("peruse-wrap") === "true";
     const listing = /** @type {{projects: ProjectView[]}} */ (
       await (await fetch("/api/projects")).json()
     );
@@ -419,6 +421,7 @@ Alpine.data("peruse", () => ({
     const v = this.$refs.viewer,
       f = this.file;
     v.innerHTML = "";
+    this.wrapAvailable = false;
     if (!f) return;
     const ext = f.path.split(".").pop()?.toLowerCase() ?? "";
     if (f.binary && IMG_EXTS.has(ext)) {
@@ -459,6 +462,7 @@ Alpine.data("peruse", () => ({
     v.innerHTML = sanitizeHTML(
       `<article class="markdown-body">${fmCard}${md.render(body)}</article>`,
     );
+    this.wrapAvailable = !!v.querySelector(".markdown-body .shiki .line");
     // Wrap each h1/h2 section in a <section> so a pinned heading is sticky
     // only within its own section — the next section pushes it away instead
     // of stacking on top of it (mismatched heights would ghost through).
@@ -544,6 +548,7 @@ Alpine.data("peruse", () => ({
 
   /** @param {HTMLElement} v @param {TextFile} f */
   renderCode(v, f) {
+    this.wrapAvailable = f.content.length > 0;
     const big = plainFallback(f);
     const lang = this.isMarkdown ? "markdown" : langForPath(f.path);
     v.innerHTML = sanitizeHTML(
@@ -581,7 +586,7 @@ Alpine.data("peruse", () => ({
     const popup = buildPanel(this.file, i, mode);
     this.$refs.viewer.appendChild(popup);
     const isLine = anchor.classList.contains("line");
-    popup.style.left = `${anchor.offsetLeft + (isLine ? 70 : 0)}px`;
+    popup.style.left = `${anchor.offsetLeft + (isLine ? this.codeGutterPx(anchor) : 0)}px`;
     popup.style.top = `${anchor.offsetTop + anchor.offsetHeight + 6}px`;
   },
   /** @param {number} i @param {HTMLElement | null} [anchorEl] */
@@ -675,7 +680,7 @@ Alpine.data("peruse", () => ({
     const line = /** @type {HTMLElement | null} */ (target.closest(".line"));
     if (
       line?.dataset.hunk !== undefined &&
-      e.clientX - line.getBoundingClientRect().left <= GUTTER_PX
+      e.clientX - line.getBoundingClientRect().left <= this.codeGutterPx(line)
     )
       return this.togglePanel(+line.dataset.hunk, line);
     this.closeAllPanels(); // click anywhere else dismisses the popup
@@ -714,6 +719,96 @@ Alpine.data("peruse", () => ({
     this.theme = this.theme === "mocha" ? "latte" : "mocha";
     localStorage.setItem("peruse-theme", this.theme);
     this.applyTheme();
+  },
+
+  // ---- word wrap ----
+  // Wrapping is pure CSS off `data-wrap` on #viewer, so no re-render — but
+  // every offset below the first wrapped line moves, and both of the
+  // measured-at-open-time positions have to be redone: the hunk popup is
+  // dropped (it is anchored at an offsetTop that no longer holds) and the
+  // markdown rail is re-laid (fenced code blocks change height).
+  /** @param {HTMLElement} line */
+  codeGutterPx(line) {
+    const gutter = Number.parseFloat(getComputedStyle(line).getPropertyValue("--code-gutter"));
+    return Number.isFinite(gutter) ? gutter : 78;
+  },
+  /** @param {HTMLElement} element */
+  stickyOnlyAnchor(element) {
+    if (getComputedStyle(element).position !== "sticky") return false;
+    const scroll = this.$refs.scroll;
+    // offsetTop follows a sticky heading's painted position in Chromium. Each
+    // rendered h1/h2 is the first child of its flow-positioned section, so the
+    // section retains the heading's undisplaced logical top.
+    const flowBox = element.matches(".markdown-body section > h1, .markdown-body section > h2")
+      ? element.parentElement
+      : element;
+    if (!flowBox) return false;
+    const flowTop = flowBox.offsetTop;
+    const visualTop = element.getBoundingClientRect().top - scroll.getBoundingClientRect().top;
+    return Math.abs(visualTop - (flowTop - scroll.scrollTop)) > 1;
+  },
+  /** @returns {{edge: "start"} | {edge: "end", offset: number} | {element: HTMLElement, offset: number} | null} */
+  wrapAnchor() {
+    const scroll = this.$refs.scroll;
+    const maxScroll = Math.max(0, scroll.scrollHeight - scroll.clientHeight);
+    // With no overflow, start and EOF are the same physical position. Prefer
+    // start so a one-line file that becomes tall when wrapped stays at its
+    // beginning instead of jumping to the newly created scroll maximum.
+    if (maxScroll <= 1 || scroll.scrollTop <= 1) return { edge: "start" };
+    const endGap = maxScroll - scroll.scrollTop;
+    const viewport = scroll.getBoundingClientRect();
+    const article = this.$refs.viewer.querySelector(".markdown-body");
+    const selector = article ? ".fm-card, [data-lines]" : ".shiki > code > .line";
+    const candidates = /** @type {HTMLElement[]} */ ([
+      ...this.$refs.viewer.querySelectorAll(selector),
+    ]).filter(
+      (element) => element.getBoundingClientRect().height > 0 && !this.stickyOnlyAnchor(element),
+    );
+    const lastContent = article
+      ? candidates.at(-1)
+      : (candidates.findLast((element) => (element.textContent?.length ?? 0) > 0) ??
+        candidates.at(-1));
+    if (lastContent) {
+      const box = lastContent.getBoundingClientRect();
+      // Preserve the measured end gap only when the reader can actually see
+      // the final logical line/block. Otherwise retain the content at the top.
+      if (box.bottom > viewport.top + 1 && box.top < viewport.bottom - 1)
+        return { edge: "end", offset: endGap };
+    }
+    const fullyVisible = candidates.find((element) => {
+      const box = element.getBoundingClientRect();
+      return box.top >= viewport.top - 1 && box.bottom <= viewport.bottom + 1;
+    });
+    const element =
+      fullyVisible ??
+      candidates.find((candidate) => {
+        const box = candidate.getBoundingClientRect();
+        return box.bottom > viewport.top + 1 && box.top < viewport.bottom - 1;
+      });
+    return element ? { element, offset: element.getBoundingClientRect().top - viewport.top } : null;
+  },
+  /** @param {{edge: "start"} | {edge: "end", offset: number} | {element: HTMLElement, offset: number} | null} anchor */
+  restoreWrapAnchor(anchor) {
+    if (!anchor) return;
+    const scroll = this.$refs.scroll;
+    if ("edge" in anchor) {
+      scroll.scrollTop =
+        anchor.edge === "start" ? 0 : scroll.scrollHeight - scroll.clientHeight - anchor.offset;
+      return;
+    }
+    if (!anchor.element.isConnected) return;
+    const current = anchor.element.getBoundingClientRect().top - scroll.getBoundingClientRect().top;
+    scroll.scrollTop += current - anchor.offset;
+  },
+  toggleWrap() {
+    const anchor = this.wrapAnchor();
+    this.wrap = !this.wrap;
+    localStorage.setItem("peruse-wrap", String(this.wrap));
+    this.closeAllPanels();
+    this.$nextTick(() => {
+      this.layoutRails();
+      this.restoreWrapAnchor(anchor);
+    });
   },
 }));
 

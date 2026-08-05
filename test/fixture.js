@@ -87,6 +87,10 @@ A paragraph that will be modified.
 ## Section Two
 
 ${Array.from({ length: 30 }, (_, i) => `Filler paragraph ${i} giving the page real scroll height.`).join("\n\n")}
+
+\`\`\`text
+${"a wide fenced line with no line-number gutter to hang under ".repeat(6).trimEnd()}
+\`\`\`
 `;
 
 export const GUIDE_EDITED = GUIDE_BASE.replace("## Section One", "## Section One Edited")
@@ -196,6 +200,49 @@ export const POST_SVX_EDITED = POST_SVX_BASE.replace(
   "const items: number[] = [1, 2, 3, 4];",
 ).replace("- bullet two", "- bullet two, revised");
 
+// Word-wrap subject (#25): committed clean, so wrap measurements are not
+// entangled with change marks. Line 2 wraps on spaces; line 3 has no break
+// opportunity at all and only wraps under `overflow-wrap: anywhere`.
+export const WIDE_TEXT = `short line
+${"the quick brown fox jumps over the lazy dog ".repeat(20).trimEnd()}
+https://example.com/${"unbreakable-token-".repeat(20)}end
+tail line
+`;
+
+export const LONG_SCROLL_TEXT = Array.from(
+  { length: 260 },
+  (_, i) =>
+    `line ${String(i + 1).padStart(3, "0")} ${"a deliberately long logical line for viewport anchoring ".repeat(10).trimEnd()}`,
+).join("\n");
+
+export const SHORT_TEXT = "first short line\nsecond short line\nthird short line\n";
+export const SINGLE_LONG_TEXT = `${"one enormous logical line that becomes vertically scrollable only when wrapped ".repeat(400).trimEnd()}\n`;
+export const TALL_FINAL_LINE_TEXT = `${Array.from(
+  { length: 80 },
+  (_, i) => `lead line ${String(i + 1).padStart(2, "0")}`,
+).join("\n")}\n${"one viewport-tall final logical line after wrapping ".repeat(1_000).trimEnd()}`;
+
+export const WRAP_ANCHOR_MARKDOWN = `# Wrap anchor fixture
+
+Introductory text before the section.
+
+## Viewport-tall fence
+
+\`\`\`text
+${"a viewport-tall fenced line used to distinguish sticky headings from logical content ".repeat(260).trimEnd()}
+\`\`\`
+
+## Following blocks
+
+${Array.from({ length: 50 }, (_, i) => `Following paragraph ${i + 1} keeps the Markdown fixture scrollable.`).join("\n\n")}
+`;
+
+export const WRAPPED_CHANGE_BASE = `export const summary = "${"a long changed line whose gutter mark must cover every visual row ".repeat(14).trimEnd()}";\n`;
+export const WRAPPED_CHANGE_EDITED = WRAPPED_CHANGE_BASE.replace(
+  "a long changed line",
+  "the modified long line",
+);
+
 export function makeFixtureRepo() {
   const dir = mkdtempSync(join(tmpdir(), "peruse-fixture-"));
   const g = (...cmd) => sh(dir, "git", ...cmd);
@@ -214,6 +261,14 @@ export function makeFixtureRepo() {
   writeFileSync(join(dir, "docs/over-limit.svx"), SVX_OVER_LIMIT);
   writeFileSync(join(dir, "docs/over-limit-unterminated.svx"), SVX_OVER_LIMIT_UNTERMINATED);
   writeFileSync(join(dir, "README.md"), "# Fixture\n\nSee [the guide](docs/guide.md).\n");
+  writeFileSync(join(dir, "docs/wide.txt"), WIDE_TEXT);
+  writeFileSync(join(dir, "docs/long-scroll.txt"), LONG_SCROLL_TEXT);
+  writeFileSync(join(dir, "docs/short.txt"), SHORT_TEXT);
+  writeFileSync(join(dir, "docs/single-long.txt"), SINGLE_LONG_TEXT);
+  writeFileSync(join(dir, "docs/tall-final-line.txt"), TALL_FINAL_LINE_TEXT);
+  writeFileSync(join(dir, "docs/wrap-anchor.md"), WRAP_ANCHOR_MARKDOWN);
+  writeFileSync(join(dir, "docs/empty.txt"), "");
+  writeFileSync(join(dir, "src/wrapped-change.js"), WRAPPED_CHANGE_BASE);
   writeFileSync(join(dir, ".gitignore"), "*.log\nignored-dir/\n");
   // Committed and never touched afterward: the negative case for `dirty`/
   // `ignored` flags (a directory/file with real git history but no changes).
@@ -224,6 +279,7 @@ export function makeFixtureRepo() {
 
   // worktree state
   writeFileSync(join(dir, "src/util.py"), UTIL_EDITED); // M, 4 separated hunks
+  writeFileSync(join(dir, "src/wrapped-change.js"), WRAPPED_CHANGE_EDITED); // M, one long hunk
   writeFileSync(join(dir, "docs/guide.md"), GUIDE_EDITED); // M, 3 changed blocks
   writeFileSync(join(dir, "docs/post.svx"), POST_SVX_EDITED); // M, script + prose hunks
   writeFileSync(join(dir, "docs/new.md"), "# Brand new\n\nAll of this is new.\n"); // U

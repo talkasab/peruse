@@ -106,7 +106,7 @@ describe("code review journey", () => {
       // popup: only the clicked change (+ context), never the whole file
       const line = page.locator(".line[data-hunk]").first();
       const box = await line.boundingBox();
-      // +20px lands inside the gutter (GUTTER_PX=64 in app.js); the gutter has
+      // +20px lands inside the line-number gutter; the gutter has
       // no separate DOM element, so there's nothing more specific to target.
       await page.mouse.click(box.x + 20, box.y + box.height / 2);
       await page.waitForSelector(".hunk-popup");
@@ -427,6 +427,518 @@ describe("mdsvex code view", () => {
       // plainPre emits bare .line elements with no token spans at all
       expect(await page.locator(".shiki .line").count()).toBeGreaterThan(10_000);
       expect(await page.locator(".shiki .line span").count()).toBe(0);
+    },
+    T,
+  );
+});
+
+describe("word wrap (#25)", () => {
+  const setWrap = async (enabled) => {
+    const current = await page.locator("#viewer").evaluate((v) => v.hasAttribute("data-wrap"));
+    if (current === enabled) return;
+    await page.click(".wrap-btn");
+    await page.waitForFunction(
+      (wanted) => document.querySelector("#viewer").hasAttribute("data-wrap") === wanted,
+      enabled,
+    );
+    await page.evaluate(
+      () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+    );
+  };
+
+  const scrollState = (selector) =>
+    page.evaluate((targetSelector) => {
+      const scroll = document.querySelector("#viewer-scroll");
+      const target = document.querySelector(targetSelector);
+      const lineHeight = Number.parseFloat(getComputedStyle(target).lineHeight);
+      return {
+        top: target.getBoundingClientRect().top - scroll.getBoundingClientRect().top,
+        scrollTop: scroll.scrollTop,
+        max: Math.max(0, scroll.scrollHeight - scroll.clientHeight),
+        endGap: Math.max(0, scroll.scrollHeight - scroll.clientHeight - scroll.scrollTop),
+        viewportHeight: scroll.clientHeight,
+        tolerance: Math.max(1, lineHeight * 0.15),
+      };
+    }, selector);
+
+  const visibleLineState = () =>
+    page.evaluate(() => {
+      const scroll = document.querySelector("#viewer-scroll");
+      const viewport = scroll.getBoundingClientRect();
+      const lines = [...document.querySelectorAll(".shiki > code > .line")];
+      const visible = lines
+        .map((line, index) => ({ line, index }))
+        .filter(({ line }) => {
+          const box = line.getBoundingClientRect();
+          return box.bottom > viewport.top + 1 && box.top < viewport.bottom - 1;
+        })
+        .map(({ index }) => index);
+      const lineHeight = Number.parseFloat(getComputedStyle(lines[0]).lineHeight);
+      return {
+        visible,
+        last: lines.length - 1,
+        lineHeight,
+        viewportHeight: scroll.clientHeight,
+        endGap: Math.max(0, scroll.scrollHeight - scroll.clientHeight - scroll.scrollTop),
+        tolerance: Math.max(1, lineHeight * 0.15),
+      };
+    });
+
+  const setEndGap = (gap) =>
+    page.$eval(
+      "#viewer-scroll",
+      (scroll, endGap) => {
+        scroll.scrollTop = scroll.scrollHeight - scroll.clientHeight - endGap;
+      },
+      gap,
+    );
+
+  const sharedLines = (before, after) =>
+    before.visible.filter((line) => after.visible.includes(line));
+
+  // Per-line geometry inside a <pre class="shiki">. Heights are expressed in
+  // line-height units (rows) so the assertions don't depend on the host's
+  // monospace metrics, and `lefts` groups the range's per-token rects by their
+  // top so each entry is one VISUAL row's left edge.
+  const measure = (sel = ".shiki") =>
+    page.evaluate((s) => {
+      const pre = document.querySelector(s);
+      const lh = Number.parseFloat(getComputedStyle(pre).lineHeight);
+      const lines = [...pre.querySelectorAll(".line")];
+      return {
+        count: lines.length,
+        wrapped: document.querySelector("#viewer").hasAttribute("data-wrap"),
+        overflows: pre.scrollWidth > pre.clientWidth + 1,
+        chip: document.querySelector(".wrap-btn").textContent,
+        codeRows: Math.round(pre.querySelector("code").offsetHeight / lh),
+        lines: lines.map((el) => {
+          const range = document.createRange();
+          range.selectNodeContents(el);
+          const byTop = new Map();
+          for (const b of range.getClientRects())
+            if (b.width)
+              byTop.set(
+                Math.round(b.top),
+                Math.min(byTop.get(Math.round(b.top)) ?? Infinity, Math.round(b.left)),
+              );
+          return {
+            rows: Math.round(el.offsetHeight / lh),
+            lefts: [...new Set(byTop.values())],
+          };
+        }),
+      };
+    }, sel);
+
+  const sumRows = (m) => m.lines.reduce((n, l) => n + l.rows, 0);
+
+  test(
+    "long lines wrap, short lines keep one row, and the choice persists",
+    async () => {
+      await openFile("docs/wide.txt");
+      await page.waitForSelector(".shiki .line");
+      const off = await measure();
+      expect(off.wrapped).toBe(false);
+      expect(off.chip).toBe("Wrap");
+      expect(off.overflows).toBe(true); // long lines scroll horizontally
+      expect(off.lines.every((l) => l.rows === 1)).toBe(true);
+      expect(off.codeRows).toBe(sumRows(off));
+
+      await page.click(".wrap-btn");
+      await page.waitForFunction(() => document.querySelector("#viewer").hasAttribute("data-wrap"));
+      const on = await measure();
+      expect(on.chip).toBe("No wrap");
+      expect(on.wrapped).toBe(true);
+      expect(on.overflows).toBe(false);
+      expect(on.count).toBe(off.count); // same line spans, none added
+      // THE inline-block check: Shiki separates .line spans with literal "\n"
+      // text nodes, and a `display: block` .line would render each of those as
+      // an extra empty line box — <code> would then be ~2x the rows its lines
+      // occupy. Equality here is what rules that out.
+      expect(on.codeRows).toBe(sumRows(on));
+      expect(on.lines[0].rows).toBe(1); // "short line"
+      expect(on.lines[3].rows).toBe(1); // "tail line"
+      expect(on.lines[1].rows).toBeGreaterThan(1); // wraps on spaces
+      expect(on.lines[2].rows).toBeGreaterThan(1); // needs overflow-wrap: anywhere
+      // hanging indent: every visual row of a wrapped line starts at the same
+      // x as the unwrapped line did — under the code, not under the gutter
+      expect(on.lines[1].lefts).toEqual(off.lines[1].lefts);
+      expect(on.lines[2].lefts).toEqual(off.lines[2].lefts);
+
+      // markdown fences have no line-number gutter, so no indent to reserve
+      await openFile("docs/guide.md");
+      await page.waitForSelector(".markdown-body .shiki .line");
+      const fence = await measure(".markdown-body .shiki");
+      expect(fence.overflows).toBe(false);
+      expect(fence.lines[0].rows).toBeGreaterThan(1);
+      expect(fence.lines[0].lefts.length).toBe(1);
+      expect(
+        await page.$eval(".markdown-body .shiki .line", (el) => getComputedStyle(el).paddingLeft),
+      ).toBe("0px");
+
+      // survives a reload, and toggling back restores unwrapped geometry
+      await page.reload();
+      await page.waitForSelector(".shiki .line");
+      expect((await measure()).wrapped).toBe(true);
+      await openFile("docs/wide.txt");
+      await page.waitForSelector(".shiki .line");
+      await page.click(".wrap-btn");
+      await page.waitForFunction(
+        () => !document.querySelector("#viewer").hasAttribute("data-wrap"),
+      );
+      const back = await measure();
+      expect(back.lines.every((l) => l.rows === 1)).toBe(true);
+      expect(back.codeRows).toBe(off.codeRows);
+    },
+    T,
+  );
+
+  test(
+    "toggling closes an open hunk popup (its anchor offsets move)",
+    async () => {
+      await openFile("src/util.py");
+      await page.waitForSelector(".line[data-hunk]");
+      await page.keyboard.press("Escape"); // known starting state
+      const box = await page.locator(".line[data-hunk]").first().boundingBox();
+      await page.mouse.click(box.x + 20, box.y + box.height / 2); // gutter click
+      await page.waitForSelector(".hunk-popup");
+      await page.click(".wrap-btn");
+      expect(await page.locator(".hunk-popup").count()).toBe(0);
+      await page.click(".wrap-btn"); // leave the toggle as found
+    },
+    T,
+  );
+
+  test(
+    "toggling and a rapid round trip keep the same logical line at the viewport top",
+    async () => {
+      await openFile("docs/long-scroll.txt");
+      await page.waitForSelector(".shiki .line");
+      await setWrap(false);
+      const positionLine = (index) =>
+        page.evaluate((i) => {
+          const scroll = document.querySelector("#viewer-scroll");
+          const line = document.querySelectorAll(".shiki .line")[i];
+          scroll.scrollTop += line.getBoundingClientRect().top - scroll.getBoundingClientRect().top;
+        }, index);
+      const atTop = () =>
+        page.evaluate(() => {
+          const scroll = document.querySelector("#viewer-scroll");
+          const top = scroll.getBoundingClientRect().top;
+          const lines = [...document.querySelectorAll(".shiki .line")];
+          const index = lines.findIndex((line) => line.getBoundingClientRect().bottom > top + 1);
+          const line = lines[index];
+          return {
+            index,
+            top: line.getBoundingClientRect().top - top,
+            lineHeight: Number.parseFloat(getComputedStyle(line).lineHeight),
+            tolerance: Math.max(1, Number.parseFloat(getComputedStyle(line).lineHeight) * 0.15),
+          };
+        });
+
+      await positionLine(149);
+      expect((await atTop()).index).toBe(149);
+      for (const enabled of [true, false]) {
+        await setWrap(enabled);
+        await page.waitForFunction(
+          () => {
+            const scroll = document.querySelector("#viewer-scroll");
+            const top = scroll.getBoundingClientRect().top;
+            const line = document.querySelectorAll(".shiki .line")[149];
+            const tolerance = Math.max(
+              1,
+              Number.parseFloat(getComputedStyle(line).lineHeight) * 0.15,
+            );
+            return Math.abs(line.getBoundingClientRect().top - top) <= tolerance;
+          },
+          null,
+          { timeout: 3_000 },
+        );
+        const anchored = await atTop();
+        expect(anchored.index).toBe(149);
+        expect(Math.abs(anchored.top)).toBeLessThanOrEqual(anchored.tolerance);
+      }
+
+      await page.evaluate(() => {
+        const button = document.querySelector(".wrap-btn");
+        button.click();
+        button.click();
+      });
+      await page.waitForFunction(
+        () => !document.querySelector("#viewer").hasAttribute("data-wrap"),
+      );
+      await page.evaluate(
+        () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+      );
+      const rapid = await atTop();
+      expect(rapid.index).toBe(149);
+      expect(Math.abs(rapid.top)).toBeLessThanOrEqual(rapid.tolerance);
+    },
+    T,
+  );
+
+  test(
+    "wrap preserves code-file top, exact EOF, and a short non-scrolling viewport",
+    async () => {
+      await openFile("docs/long-scroll.txt");
+      await page.waitForSelector(".shiki .line");
+      await setWrap(false);
+      await page.$eval("#viewer-scroll", (scroll) => {
+        scroll.scrollTop = 0;
+      });
+      const topBefore = await scrollState(".shiki .line:first-child");
+      await setWrap(true);
+      await setWrap(false);
+      const topAfter = await scrollState(".shiki .line:first-child");
+      expect(topAfter.scrollTop).toBe(0);
+      expect(Math.abs(topAfter.top - topBefore.top)).toBeLessThanOrEqual(topAfter.tolerance);
+
+      await page.$eval("#viewer-scroll", (scroll) => {
+        scroll.scrollTop = scroll.scrollHeight;
+      });
+      const eofBefore = await scrollState(".shiki .line:last-child");
+      expect(eofBefore.endGap).toBeLessThanOrEqual(eofBefore.tolerance);
+      await setWrap(true);
+      const eofWrapped = await scrollState(".shiki .line:last-child");
+      expect(eofWrapped.endGap).toBeLessThanOrEqual(eofWrapped.tolerance);
+
+      await openFile("docs/short.txt");
+      await page.waitForSelector(".shiki .line");
+      await setWrap(false);
+      const shortBefore = await scrollState(".shiki .line:first-child");
+      expect(shortBefore.max).toBe(0);
+      await setWrap(true);
+      const shortAfter = await scrollState(".shiki .line:first-child");
+      expect(shortAfter.max).toBe(0);
+      expect(shortAfter.scrollTop).toBe(0);
+    },
+    T,
+  );
+
+  test(
+    "a non-overflowing file that gains a scrollbar still prefers file start",
+    async () => {
+      await openFile("docs/single-long.txt");
+      await page.waitForSelector(".shiki .line");
+      await setWrap(false);
+      const singleBefore = await scrollState(".shiki .line:first-child");
+      expect(singleBefore.max).toBe(0);
+      expect(singleBefore.scrollTop).toBe(0);
+      await setWrap(true);
+      const singleWrapped = await scrollState(".shiki .line:first-child");
+      expect(singleWrapped.max).toBeGreaterThan(0);
+      expect(singleWrapped.scrollTop).toBe(0);
+    },
+    T,
+  );
+
+  test(
+    "visible end content keeps its gap while both sides of the old distance boundary retain content",
+    async () => {
+      await openFile("docs/long-scroll.txt");
+      await page.waitForSelector(".shiki .line");
+      await setWrap(false);
+      const geometry = await visibleLineState();
+      const gaps = [0, 1, 2, 0.5 * geometry.lineHeight, 0.9 * geometry.lineHeight];
+      for (const gap of gaps) {
+        await setEndGap(gap);
+        const before = await visibleLineState();
+        expect(before.visible).toContain(before.last);
+        await setWrap(true);
+        const wrapped = await visibleLineState();
+        expect(wrapped.visible).toContain(wrapped.last);
+        expect(Math.abs(wrapped.endGap - before.endGap)).toBeLessThanOrEqual(before.tolerance);
+        await setWrap(false);
+      }
+
+      const boundaryDelta = Math.ceil(geometry.lineHeight);
+      for (const gap of [
+        geometry.viewportHeight - boundaryDelta,
+        geometry.viewportHeight + boundaryDelta,
+      ]) {
+        await setEndGap(gap);
+        const before = await visibleLineState();
+        expect(before.visible).not.toContain(before.last);
+        await setWrap(true);
+        const wrapped = await visibleLineState();
+        expect(sharedLines(before, wrapped).length).toBeGreaterThan(0);
+        await setWrap(false);
+      }
+    },
+    T,
+  );
+
+  test(
+    "a viewport-tall final line uses end anchoring only while that line is visible",
+    async () => {
+      await openFile("docs/tall-final-line.txt");
+      await page.waitForSelector(".shiki .line");
+      await setWrap(false);
+      const geometry = await visibleLineState();
+      const boundaryDelta = Math.ceil(geometry.lineHeight);
+      const visibleGap = Math.ceil(geometry.lineHeight * 1.05);
+
+      await setEndGap(visibleGap);
+      const visibleBefore = await visibleLineState();
+      expect(visibleBefore.visible).toContain(visibleBefore.last);
+      await setWrap(true);
+      const visibleAfter = await visibleLineState();
+      expect(visibleAfter.visible).toContain(visibleAfter.last);
+      expect(sharedLines(visibleBefore, visibleAfter)).toContain(visibleBefore.last);
+      expect(Math.abs(visibleAfter.endGap - visibleBefore.endGap)).toBeLessThanOrEqual(
+        visibleBefore.tolerance,
+      );
+
+      await page.setViewportSize({ width: 1280, height: 799 });
+      await page.evaluate(
+        () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+      );
+      const resized = await visibleLineState();
+      expect(resized.visible).toContain(resized.last);
+      await setWrap(false);
+      const resizedUnwrapped = await visibleLineState();
+      expect(Math.abs(resizedUnwrapped.endGap - resized.endGap)).toBeLessThanOrEqual(
+        resized.tolerance,
+      );
+      await setWrap(true);
+      const resizedWrapped = await visibleLineState();
+      expect(Math.abs(resizedWrapped.endGap - resized.endGap)).toBeLessThanOrEqual(
+        resized.tolerance,
+      );
+      await page.setViewportSize({ width: 1280, height: 800 });
+      await page.evaluate(
+        () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+      );
+      await setWrap(false);
+      await setEndGap(geometry.viewportHeight - boundaryDelta);
+      const hiddenBefore = await visibleLineState();
+      expect(hiddenBefore.visible).not.toContain(hiddenBefore.last);
+      await setWrap(true);
+      const hiddenAfter = await visibleLineState();
+      expect(sharedLines(hiddenBefore, hiddenAfter).length).toBeGreaterThan(0);
+    },
+    T,
+  );
+
+  test(
+    "Markdown anchors viewport-tall fences, ordinary blocks, and exact EOF",
+    async () => {
+      await openFile("docs/wrap-anchor.md");
+      await page.waitForSelector(".markdown-body .shiki");
+      await setWrap(false);
+      await page.$eval(".markdown-body .shiki", (fence) => {
+        const scroll = document.querySelector("#viewer-scroll");
+        scroll.scrollTop += fence.getBoundingClientRect().top - scroll.getBoundingClientRect().top;
+      });
+      const original = await scrollState(".markdown-body .shiki");
+      for (let cycle = 0; cycle < 3; cycle++) {
+        await setWrap(true);
+        const wrapped = await scrollState(".markdown-body .shiki");
+        expect(Math.abs(wrapped.top - original.top)).toBeLessThanOrEqual(wrapped.tolerance);
+        await setWrap(false);
+        const returned = await scrollState(".markdown-body .shiki");
+        expect(Math.abs(returned.top - original.top)).toBeLessThanOrEqual(returned.tolerance);
+      }
+
+      const blockSelector = ".markdown-body section:last-child p:nth-of-type(15)";
+      await page.$eval(blockSelector, (block) => {
+        const scroll = document.querySelector("#viewer-scroll");
+        scroll.scrollTop += block.getBoundingClientRect().top - scroll.getBoundingClientRect().top;
+      });
+      const blockBefore = await scrollState(blockSelector);
+      await setWrap(true);
+      const blockAfter = await scrollState(blockSelector);
+      expect(Math.abs(blockAfter.top - blockBefore.top)).toBeLessThanOrEqual(blockAfter.tolerance);
+
+      await setWrap(false);
+      await page.$eval("#viewer-scroll", (scroll) => {
+        scroll.scrollTop = scroll.scrollHeight;
+      });
+      const eofBefore = await scrollState(".markdown-body section:last-child p:last-child");
+      expect(eofBefore.endGap).toBeLessThanOrEqual(eofBefore.tolerance);
+      await setWrap(true);
+      const eofWrapped = await scrollState(".markdown-body section:last-child p:last-child");
+      expect(eofWrapped.endGap).toBeLessThanOrEqual(eofWrapped.tolerance);
+    },
+    T,
+  );
+
+  test(
+    "wrapped modified marks span the line and the gutter fits six digits",
+    async () => {
+      await openFile("src/wrapped-change.js");
+      await page.waitForSelector(".line.hl-mod");
+      await setWrap(true);
+      const mark = await page.$eval(".line.hl-mod", (line) => {
+        const lh = Number.parseFloat(getComputedStyle(line).lineHeight);
+        const generated = getComputedStyle(line, "::after");
+        return {
+          rows: line.offsetHeight / lh,
+          lineHeight: line.offsetHeight,
+          markHeight: Number.parseFloat(generated.height),
+          markContent: generated.content,
+        };
+      });
+      expect(mark.rows).toBeGreaterThan(2);
+      expect(mark.markContent).not.toBe("none");
+      expect(Math.abs(mark.markHeight - mark.lineHeight)).toBeLessThanOrEqual(1);
+
+      await openFile("src/util.py");
+      await page.waitForSelector(".line.hl-del");
+      await setWrap(true);
+      const deletion = await page.$eval(".line.hl-del", (line) => ({
+        bar: getComputedStyle(line, "::after").content,
+        wedge: getComputedStyle(line, "::before").backgroundImage,
+      }));
+      expect(deletion.bar).toBe("none");
+      expect(deletion.wedge).not.toBe("none");
+
+      await openFile("docs/wide.txt");
+      await page.waitForSelector(".shiki .line");
+      await setWrap(true);
+      const gutter = await page.$eval(".shiki .line", (line) => {
+        const pre = line.closest(".shiki");
+        const pseudo = getComputedStyle(line, "::before");
+        const probe = document.createElement("span");
+        probe.textContent = "100000";
+        probe.style.cssText = "position:absolute;visibility:hidden;white-space:pre";
+        probe.style.font = getComputedStyle(pre).font;
+        document.body.appendChild(probe);
+        const digitWidth = probe.getBoundingClientRect().width;
+        probe.remove();
+        const numberWidth = Number.parseFloat(pseudo.width);
+        const padding = Number.parseFloat(pseudo.paddingRight);
+        const margin = Number.parseFloat(pseudo.marginRight);
+        return {
+          digitWidth,
+          numberWidth,
+          gutter: Number.parseFloat(getComputedStyle(pre).getPropertyValue("--code-gutter")),
+          components: numberWidth + padding + margin,
+          indent: Number.parseFloat(getComputedStyle(line).paddingLeft),
+        };
+      });
+      expect(gutter.numberWidth + 0.5).toBeGreaterThanOrEqual(gutter.digitWidth);
+      expect(Math.abs(gutter.gutter - gutter.components)).toBeLessThanOrEqual(1);
+      expect(Math.abs(gutter.indent - gutter.gutter)).toBeLessThanOrEqual(1);
+    },
+    T,
+  );
+
+  test(
+    "the chip is shown only where wrapping can change visible content",
+    async () => {
+      await openFile("docs/empty.txt");
+      expect(await page.locator(".wrap-btn").isVisible()).toBe(false);
+
+      await openFile("README.md");
+      await page.waitForSelector(".markdown-body");
+      expect(await page.locator(".wrap-btn").isVisible()).toBe(false);
+      await page.click("#pane-header button:has-text('Raw')");
+      await page.waitForSelector(".shiki .line");
+      expect(await page.locator(".wrap-btn").isVisible()).toBe(true);
+
+      await openFile("docs/guide.md");
+      await page.waitForSelector(".markdown-body .shiki .line");
+      expect(await page.locator(".wrap-btn").isVisible()).toBe(true);
     },
     T,
   );

@@ -104,12 +104,14 @@
         </span>
         <button type="button" class="chip" x-show="isMarkdown && !file?.binary" @click="raw = !raw"
                 x-text="raw ? 'Rendered' : 'Raw'"></button>
+        <button type="button" class="chip wrap-btn" x-show="wrapAvailable" @click="toggleWrap()"
+                x-text="wrap ? 'No wrap' : 'Wrap'" title="Toggle word wrap"></button>
       </div>
       <div id="viewer-scroll" x-ref="scroll">
         <div class="render-wait" x-show="loading" x-cloak>
           <span class="spin"></span> rendering <span x-text="loadingName"></span>…
         </div>
-        <div id="viewer" x-ref="viewer"></div>
+        <div id="viewer" x-ref="viewer" :data-wrap="wrap ? '' : null"></div>
         <div class="placeholder" x-show="!file && !loading">select a file</div>
       </div>
     </section>

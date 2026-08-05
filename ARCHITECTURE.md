@@ -237,7 +237,8 @@ Alpine.js component; no framework build. At `/`, it renders registered projects
 with path, git summary, last-opened date, dimmed missing state, and grouped live
 worktrees. At `/p/<name>/`, state is tree + flattened visible rows
 (depth-annotated), selection via `location.hash` (`#/path`), a grouped project /
-worktree dropdown in the header, and theme in `localStorage`.
+worktree dropdown in the header, and theme + word-wrap preference in
+`localStorage`.
 
 - **Tree**: VS Code explorer conventions — uniform 24 px rows, rotating
   chevrons (only on expandable dirs), folder/file SVG-mask icons, indent
@@ -262,7 +263,10 @@ worktree dropdown in the header, and theme in `localStorage`.
   off by the next (no sticky stacking).
 - **Code**: Shiki dual-theme (`catppuccin-latte`/`mocha`, CSS-variable
   output — theme flips without re-render), ~30 eagerly bundled grammars,
-  JS regex engine (no wasm), line numbers via CSS counters. Files >1 MB or
+  JS regex engine (no wasm), line numbers via CSS counters. The 78 px
+  `--code-gutter` includes a 52 px number box (six-digit budget), 16 px right
+  padding, and 10 px margin; wrapping, popup placement, and gutter hit-testing
+  all consume that same CSS value. Files >1 MB or
   over 10,000 logical lines render plain with a notice; the more expensive
   mdsvex composite has a 3,500-logical-line ceiling. One terminal LF or CRLF
   ends the last line without creating another logical line, so terminated and
@@ -297,10 +301,38 @@ worktree dropdown in the header, and theme in `localStorage`.
   ordinary `.toml` files.
   `.svx` is always a **code view** — it is not in `isMarkdown`, so it never gets
   the Rendered/Raw toggle and nothing is ever compiled.
+- **Word wrap**: a pane-header chip toggles `data-wrap` on `#viewer`; the
+  effect is pure CSS (no re-render), covering both highlighted and plain
+  output plus markdown fences, since all three emit the same
+  `.shiki > code > .line` markup. Wrapped `.line`s are `inline-block`, not
+  `block` — Shiki separates them with literal newline text nodes, which under
+  a block box would each add an empty line (doubled spacing). A hanging indent
+  derived from `--code-gutter` keeps
+  continuation rows under the code; markdown fences, which have no line-number
+  gutter, reset it. Before toggling, the client captures the first fully
+  visible logical code line or rendered Markdown block (falling back to the
+  first intersecting item), then restores its viewport offset after Alpine's
+  layout tick. A sticky Markdown heading whose painted position differs from
+  its section's flow position is excluded, so a viewport-tall fence remains the
+  intersecting anchor instead of the pinned heading above it. Start/end states
+  are explicit anchors: a non-overflowing pane is always START (even though its
+  sole physical position is also its end), and start restores zero. Within the
+  viewport, the final meaningful logical code line or rendered Markdown block
+  determines the end behavior: when that final content intersects the reader,
+  the anchor is end-relative and preserves the measured end gap through
+  reflow, with exact EOF therefore restoring the new scroll maximum. When the
+  final content is not visible, the normal top-line/block anchor retains the
+  content being read. Toggling also closes any open hunk popup and
+  re-lays the Markdown rail, both of which cache positions measured at open
+  time. The chip is hidden for empty and binary files; rendered Markdown offers
+  it only when a code fence exists, while nonempty raw Markdown offers it like
+  any code view.
 - **Change marks** (the core interaction):
   - Code: 3 px gutter bars on exactly the changed lines (blue modified,
     green added) and a red wedge at deletion points — the VS Code/JetBrains
-    gutter convention.
+    gutter convention. In wrap mode, added/modified bars span the logical
+    line's full visual height; the deletion wedge remains a single indicator
+    anchored to its first row.
   - Markdown: a fixed change rail left of **all** content — overlay bars,
     JS-measured per marked block (`offsetTop`/`offsetHeight` against the
     positioned `#viewer`), one x at any nesting depth, re-laid on resize

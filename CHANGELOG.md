@@ -51,6 +51,15 @@ date and becomes the GitHub release notes (see
   themes; other style languages remain plain within their style block. `.svx`
   stays a code view; files over 3,500 logical lines use the plain-source
   fallback regardless of a terminal newline, and nothing is compiled (#18)
+- Word-wrap toggle for the file view: a `Wrap` / `No wrap` chip in the pane
+  header soft-wraps long lines instead of scrolling them horizontally, with
+  continuation rows and change marks aligned across the full wrapped line.
+  Toggling retains visible logical content: it preserves the end gap when the
+  final line or Markdown block is visible and otherwise keeps the top visible
+  line or block anchored. This includes files that gain a scrollbar when
+  wrapped and viewport-tall Markdown fences. The chip appears only for
+  nonempty code/raw views and rendered Markdown containing a code fence. Off
+  by default and remembered across sessions (#25)
 - Multi-project serving with an auto-maintained project registry, `add`, `rm`,
   `list`, and `prune` CLI commands, a project landing page, shareable
   `/p/<name>/` URLs, live grouped Git worktrees, a header project switcher, and

@@ -4,6 +4,172 @@ Narrative record of work sessions — what changed, what we learned, and why.
 Newest first. (The [CHANGELOG](../CHANGELOG.md) is the user-facing summary;
 this is the engineering story.)
 
+## 2026-08-05 — Word wrap toggle (#25)
+
+- Wrapping is entirely CSS off a `data-wrap` attribute on `#viewer`: `hlCode()`,
+  the large-file `plainPre()` fallback, and markdown fences all emit the same
+  `.shiki > code > .line` markup, so one rule set covers every code path with no
+  re-render. State mirrors the theme toggle (`peruse-wrap` in `localStorage`).
+- The subtlety the issue flagged is real and now has a regression test. Shiki
+  separates `.line` spans with literal `\n` text nodes; with `display: block` on
+  a wrapping line each of those newlines becomes its own empty line box and the
+  file renders at double spacing. `inline-block` avoids that while still
+  honoring `width`/`padding`/`text-indent`. The test measures it structurally
+  rather than by eye: `<code>`'s height in line-height units must equal the sum
+  of its lines' heights in line-height units, which doubling breaks. On the new
+  `docs/wide.txt` fixture with wrap on, the lines occupy 1 + 8 + 4 + 1 + 1 = 15
+  rows and `<code>` is 291px = 15 × 19.375px; with wrap off, 5 rows and 97px.
+- Range client rects are per *token*, not per visual row — the first attempt at
+  measuring "how many rows did this line wrap to" counted Shiki spans and
+  reported 30 rows for an 8-row line. Grouping the rects by rounded `top` gives
+  real rows and, more usefully, each row's left edge, which is how the hanging
+  indent is verified: all 8 rows of the wrapped line start at x=350, the same x
+  the unwrapped line started at — under the code, not under the 70px
+  line-number gutter. Markdown fences suppress the line number
+  (`content: none`), so they reset the indent to 0 and are asserted separately.
+- Toggling drops any open hunk popup — its `top` came from `anchor.offsetTop`
+  when it opened, and every offset below the first wrapped line moves — and
+  re-runs `layoutRails()` for markdown, where fence blocks change height.
+
+### 2026-08-05 addendum — adversarial fix round
+
+- Wrap toggles now preserve a logical viewport anchor: the first fully visible
+  code line or rendered Markdown block, falling back to the first intersecting
+  item when a wrapped item is taller than the viewport. In Chromium, placing
+  line 150 of a 200-long-line fixture at the top left it topmost after both
+  transitions; its measured offset was -0.625 px after wrapping and -1.125 px
+  after unwrapping (one line-height is 19.375 px).
+- Wrapped added/modified marks moved from the one-row line-number pseudo-element
+  to a full-height positioned bar. The regression fixture's modified line was
+  eight visual rows / 155 px high, and its mark measured the same 155 px;
+  deletions retain one first-row wedge and no full-height bar.
+- The 44 px line-number box could not fit a six-digit label (45.156 px in the
+  test font). That limitation predates this branch, but wrapping made gutter
+  geometry a shared dependency, so the number box is now 52 px inside one
+  78 px `--code-gutter`. The same variable drives the hanging indent, popup
+  offset, and gutter click target; the documented budget is six digits.
+- The wrap chip is hidden where it cannot affect content: binary and empty
+  files, and rendered Markdown without a fenced code block. It remains visible
+  for rendered Markdown with a fence and for any nonempty raw/code view.
+- Chromium coverage asserts viewport anchoring in both directions, mark height
+  relative to the wrapped logical line, the single deletion wedge, six-digit
+  fit and shared gutter/indent geometry, and all chip-visibility cases without
+  relying on fixed viewport or font pixel values.
+- Final verification: `bun run check` passed; `bun run test` passed 67/67
+  unit/integration tests; `bun run test:e2e` passed its isolated 1-test switcher
+  run and 15-test browser run (16/16 total).
+
+### 2026-08-05 second addendum — viewport-edge hardening
+
+- Sticky headings cannot be treated as ordinary viewport rectangles: CSS
+  paints them away from their normal flow position. The anchor search now
+  compares each sticky h1/h2 with its containing section's undisplaced offset
+  and excludes it when those positions differ. A fence taller than the viewport
+  then reaches the documented first-intersecting fallback. Its original top was
+  0.25 px and all three wrap/unwrap cycles measured 0.25 px in both directions;
+  before the correction every return landed 26 px low.
+- Start and EOF are explicit anchors rather than incidental code-line/block
+  choices. The 220-line code fixture stayed at `endGap = 0` while its scroll
+  maximum changed from 3,568 to 20,618 px; rendered Markdown likewise stayed at
+  `endGap = 0` while its maximum changed from 659 to 4,004 px. At file start,
+  the natural first-line inset measured 14 → 12 → 14 px and `scrollTop` stayed
+  zero throughout, removing the prior accumulated 2 px drift.
+- The common line-anchor oracle now requires logical line 150 itself—not a
+  neighbor—to remain topmost, within 15% of the measured line height (2.906 px
+  in Chromium). Coverage now also includes a same-tick double toggle, an
+  ordinary Markdown block below changing content, three viewport-tall fence
+  cycles, exact EOF in code and Markdown, file start, and a short file with no
+  vertical scrollbar.
+- Final verification: `bun run check` passed; `bun run test` passed 67/67 with
+  194 assertions; `bun run test:e2e` passed 18/18 with 120 assertions across
+  the required isolated browser invocations.
+
+### 2026-08-05 third addendum — start/EOF classification
+
+- A pane with no vertical overflow is simultaneously at its start and end.
+  EOF previously won that tie, so wrapping one enormous line created a
+  4,498 px scroll range and immediately moved to its bottom. START now wins:
+  the measured transition was `scrollTop 0 → 0`, `maxScroll 0 → 4,498`.
+- EOF is a reading region, not a one-pixel coordinate. The edge classifier now
+  uses one measured content line height; actual end gaps 0, 1, and 2 px all
+  restored to end gap 0 after wrapping. The control position 706 px above EOF
+  remained logical line 148 at essentially the same viewport offset
+  (0.125 → -0.375 px), rather than being absorbed into EOF.
+- The file-top oracle now requires `scrollTop === 0`. Dedicated Chromium
+  regressions cover the no-overflow-to-overflow transition, 0/1/2 px end gaps,
+  and a clearly non-EOF logical anchor.
+- Final gates: `bun run check` passed; unit/integration passed 67/67 (194
+  assertions); the separately invoked browser suites passed 20/20 (134
+  assertions).
+
+### 2026-08-05 fourth addendum — continuous bottom-region anchoring
+
+- The one-line-height EOF bucket still had a discontinuity: with a 19.375 px
+  line height, a 19 px gap snapped to EOF while a 21 px gap landed 2,890 px
+  away after wrapping. The bottom region is now the final reader viewport
+  (`endGap <= clientHeight`), and its anchor stores the measured end gap rather
+  than collapsing the whole region to zero. Exact EOF remains the natural
+  zero-gap case; positions beyond one viewport continue to use a logical
+  top-line/block anchor.
+- Chromium measured actual end gaps for 0.5×, 0.9×, 1.1×, and 1.5× line height
+  as 10, 17, 21, and 29 px before wrapping and the same 10, 17, 21, and 29 px
+  afterward. The half-viewport regression is derived from the live reader
+  geometry and uses the same bounded end-relative assertion.
+- At a 639 px reader viewport, the 706 px control remained logical line 193 at
+  a 17 px top offset before and after wrapping; its end gap changed from 706 to
+  5,978 px as the long lines below expanded, confirming the top anchor remained
+  in control outside the bottom region. Fixture trailing content now keeps the
+  established line-150 and viewport-tall-fence regressions outside that region.
+- Edge-case replay retained exact file top (`scrollTop 0 → 0`), exact EOF
+  (`endGap 0 → 0`), the non-overflowing huge-line START transition
+  (`maxScroll 0 → 4,578`, `scrollTop 0 → 0`), and a short non-overflowing file.
+  The Markdown fence grew 39 → 3,384 px while its top stayed at 0.25 px,
+  confirming sticky-heading exclusion and the viewport-tall fallback.
+- Final gates: `bun run check` passed; unit/integration passed 67/67 with 194
+  assertions; the separately invoked browser suites passed 20/20 with 137
+  assertions.
+
+### 2026-08-05 fifth addendum — visible-end anchoring
+
+- The fourth-round `endGap <= clientHeight` classifier preserved a scalar gap
+  while losing the reader's content at its inside edge: at a 719 px viewport,
+  699 px from EOF changed visible code lines 188–225 into 246–253 with no
+  overlap. The end anchor is now semantic: it applies only when the final
+  meaningful logical code line or rendered Markdown block intersects the
+  current viewport. Otherwise the existing top-line/block anchor applies. The
+  end case still stores and restores its measured gap; START, clamping, and
+  sticky-only heading exclusion are unchanged.
+- The replacement Chromium regression captures visible logical-line sets on
+  both sides of the old distance boundary. With a measured 19.375 px line
+  height and 719 px reader, the derived gaps were `719 - ceil(19.375) = 699`
+  and `719 + ceil(19.375) = 739` px. After wrapping, 699 px retained lines
+  188–196 from the prior 188–225 range (9 shared), and 739 px retained 186–194
+  from 186–223 (9 shared). Under the fourth-round classifier the same focused
+  tests failed with zero overlap at 699 px.
+- A separate fixture has 80 short lead lines and one final line that becomes
+  taller than the viewport. At the derived 21 px gap the final line was
+  visible before wrapping: lines 44–81 became line 81, keeping the end visible
+  and preserving `endGap 21 → 21`. At 699 px the final line was absent: lead
+  lines 9–46 remained lines 9–46 after wrapping (38 shared), instead of being
+  replaced by the giant final line. That hidden-final-line assertion also
+  failed with zero overlap under the fourth-round classifier.
+- Resize classification uses live geometry. While the giant final line
+  remained visible, reducing `clientHeight` 719 → 718 naturally changed its
+  gap 21 → 22 px; unwrap and rewrap both preserved 22 px. Replays also retained
+  the ordinary 21 → 21 → 21 stored-gap round trip, no-overflow START
+  (`scrollTop 0`, `maxScroll 0 → 4,498`), clamp-to-START on shrink, exact code
+  and Markdown EOF (`endGap 0 → 0`), exact file top (`scrollTop 0 → 0`), line
+  150 as the first visible logical line, the 0.25 px viewport-tall Markdown
+  fence anchor across wrap cycles, its displaced sticky heading exclusion, an
+  8-row/155 px change mark, and popup closure (`1 → 0`).
+- Final gates: `bun run check` passed (Biome checked 29 files; both production
+  type-check configurations passed); unit/integration passed 67/67 with 194
+  assertions; the separately invoked browser suites passed 21/21 with 155
+  assertions (1/1 switcher, then 20/20 core/navigation/sanitization). The first
+  full browser invocation encountered a Bun subprocess with no stdout and
+  cascaded to three shared-page failures; an immediate full-command replay was
+  clean.
+
 ## 2026-08-05 — mdsvex `.svx` highlighting (#18)
 
 `.svx` was falling through to `text`. The issue proposed two options in order:
