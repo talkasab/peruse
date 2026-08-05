@@ -44,6 +44,13 @@ date and becomes the GitHub release notes (see
   scrolled down) (#14)
 
 ### Added
+- mdsvex `.svx` files are syntax highlighted instead of shown as plain text.
+  YAML/TOML frontmatter, Markdown prose and autolinks, Svelte tags, directives
+  and `{expression}` blocks, `<script>` (JavaScript and TypeScript), `<style>`
+  (CSS, SCSS, and PostCSS), and fenced code are coloured distinctly in both
+  themes; other style languages remain plain within their style block. `.svx`
+  stays a code view; files over 3,500 logical lines use the plain-source
+  fallback regardless of a terminal newline, and nothing is compiled (#18)
 - Multi-project serving with an auto-maintained project registry, `add`, `rm`,
   `list`, and `prune` CLI commands, a project landing page, shareable
   `/p/<name>/` URLs, live grouped Git worktrees, a header project switcher, and

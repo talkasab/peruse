@@ -1,5 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { esc, fmtSize, langForPath, resolveLang, splitFrontmatter } from "../../web/lib.js";
+import {
+  esc,
+  exceedsLineLimit,
+  fmtSize,
+  langForPath,
+  resolveLang,
+  splitFrontmatter,
+} from "../../web/lib.js";
 
 describe("splitFrontmatter", () => {
   test("parses rows and pads the body to preserve line numbers", () => {
@@ -34,6 +41,9 @@ describe("language resolution", () => {
     expect(langForPath("src/a.py", loaded)).toBe("python");
     expect(langForPath("a/b/c.mjs", loaded)).toBe("javascript");
     expect(resolveLang("sh", loaded)).toBe("shellscript"); // alias even if not in loaded
+    // .svx is a code view in the composite mdsvex grammar, never markdown —
+    // routing it to "markdown" would also hand it the Rendered/Raw toggle
+    expect(langForPath("docs/post.svx", loaded)).toBe("mdsvex");
   });
   test("special filenames", () => {
     expect(langForPath("Dockerfile", loaded)).toBe("docker");
@@ -59,4 +69,20 @@ describe("fmtSize / esc", () => {
   test("esc handles markup characters", () => {
     expect(esc("<a & b>")).toBe("&lt;a &amp; b&gt;");
   });
+});
+
+describe("exceedsLineLimit", () => {
+  const terminated = (lines, newline = "\n") => `line${newline}`.repeat(lines);
+  const unterminated = (lines) => Array.from({ length: lines }, () => "line").join("\n");
+
+  for (const limit of [3500, 10_000]) {
+    test(`${limit.toLocaleString()}-line boundary ignores one terminal newline`, () => {
+      expect(exceedsLineLimit(terminated(limit), limit)).toBe(false);
+      expect(exceedsLineLimit(unterminated(limit), limit)).toBe(false);
+      expect(exceedsLineLimit(terminated(limit, "\r\n"), limit)).toBe(false);
+      expect(exceedsLineLimit(terminated(limit + 1), limit)).toBe(true);
+      expect(exceedsLineLimit(unterminated(limit + 1), limit)).toBe(true);
+      expect(exceedsLineLimit(terminated(limit + 1, "\r\n"), limit)).toBe(true);
+    });
+  }
 });

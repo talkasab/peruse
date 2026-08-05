@@ -93,6 +93,109 @@ export const GUIDE_EDITED = GUIDE_BASE.replace("## Section One", "## Section One
   .replace("will be modified", "HAS been modified")
   .replace("bullet three will change", "bullet three CHANGED");
 
+// One mdsvex document carrying every region the composite grammar has to keep
+// apart: YAML frontmatter, a typed <script>, Markdown prose/lists, a component
+// with a directive, control-flow and {@html} blocks, a fenced code block, and a
+// preprocessed <style>. The region markers below are what the tests search for
+// — keep them unique and keep each region's shape if you edit this.
+export const POST_SVX_BASE = `---
+title: Release Notes
+draft: false
+tags:
+  - mdsvex
+---
+
+<script lang="ts">
+  import Callout from './Callout.svelte';
+  export let version: string = '1.0.0';
+  const items: number[] = [1, 2, 3];
+</script>
+
+# Release {version}
+
+Prose with **bold**, _emphasis_, a [link](https://example.com) and \`code\`.
+Autolinks: <https://example.com/docs> and <a@example.com>.
+
+- bullet one
+- bullet two
+
+<Callout kind="info" on:dismiss={() => close()}>Heads up</Callout>
+
+<X
+  answer={42}
+>
+  <Y><Z>{version}</Z></Y>
+</X>
+
+{#if items.length}
+  {#each items as item, i}
+    <li>{i}: {item}</li>
+  {/each}
+{:else}
+  <p>Nothing here</p>
+{/if}
+
+{@html '<hr />'}
+
+\`\`\`js
+const answer = 42;
+\`\`\`
+
+<style lang="scss">
+  .callout { color: rebeccapurple; }
+</style>
+`;
+
+export const TOML_SVX = `+++
+title = "TOML Notes"
+draft = false
+tags = ["mdsvex", "toml"]
++++
+
+# TOML frontmatter
+`;
+
+export const STYLE_LANGS_SVX = `# Styles {theme}
+<style>
+  .css { color: red; }
+</style>
+<style lang="scss">
+  $tone: blue;
+  .scss { color: $tone; }
+</style>
+<style lang="postcss">
+  .postcss { color: color(red alpha(50%)); }
+</style>
+<style lang="less">
+  @tone: green;
+  .less { color: @tone; }
+</style>
+<Widget active={theme} />
+`;
+
+export const DEEP_SVX = `${"<X>".repeat(100)}{value}${"</X>".repeat(100)}\n`;
+export const SVX_HL_LINE_LIMIT = 3500;
+const SVX_BOUNDARY_UNIT = `# Heading {value}
+Paragraph with **bold**, a [link](https://example.com), and {value}.
+<X answer={42}>content</X>
+{#if value}
+  <p>{value}</p>
+{/if}
+\`\`\`js
+const answer = 42;
+\`\`\`
+
+`;
+export const SVX_AT_LIMIT = SVX_BOUNDARY_UNIT.repeat(SVX_HL_LINE_LIMIT / 10);
+export const SVX_AT_LIMIT_UNTERMINATED = SVX_AT_LIMIT.replace(/\n$/, "");
+export const SVX_OVER_LIMIT = `${SVX_AT_LIMIT}# Over limit\n`;
+export const SVX_OVER_LIMIT_UNTERMINATED = SVX_OVER_LIMIT.replace(/\n$/, "");
+
+export const POST_SVX_EDITED = POST_SVX_BASE.replace(
+  "const items: number[] = [1, 2, 3];",
+  "const items: number[] = [1, 2, 3, 4];",
+).replace("- bullet two", "- bullet two, revised");
+
 export function makeFixtureRepo() {
   const dir = mkdtempSync(join(tmpdir(), "peruse-fixture-"));
   const g = (...cmd) => sh(dir, "git", ...cmd);
@@ -104,6 +207,12 @@ export function makeFixtureRepo() {
   mkdirSync(join(dir, "docs"));
   writeFileSync(join(dir, "src/util.py"), UTIL_BASE);
   writeFileSync(join(dir, "docs/guide.md"), GUIDE_BASE);
+  writeFileSync(join(dir, "docs/post.svx"), POST_SVX_BASE);
+  writeFileSync(join(dir, "docs/toml.svx"), TOML_SVX);
+  writeFileSync(join(dir, "docs/at-limit.svx"), SVX_AT_LIMIT);
+  writeFileSync(join(dir, "docs/at-limit-unterminated.svx"), SVX_AT_LIMIT_UNTERMINATED);
+  writeFileSync(join(dir, "docs/over-limit.svx"), SVX_OVER_LIMIT);
+  writeFileSync(join(dir, "docs/over-limit-unterminated.svx"), SVX_OVER_LIMIT_UNTERMINATED);
   writeFileSync(join(dir, "README.md"), "# Fixture\n\nSee [the guide](docs/guide.md).\n");
   writeFileSync(join(dir, ".gitignore"), "*.log\nignored-dir/\n");
   // Committed and never touched afterward: the negative case for `dirty`/
@@ -116,7 +225,14 @@ export function makeFixtureRepo() {
   // worktree state
   writeFileSync(join(dir, "src/util.py"), UTIL_EDITED); // M, 4 separated hunks
   writeFileSync(join(dir, "docs/guide.md"), GUIDE_EDITED); // M, 3 changed blocks
+  writeFileSync(join(dir, "docs/post.svx"), POST_SVX_EDITED); // M, script + prose hunks
   writeFileSync(join(dir, "docs/new.md"), "# Brand new\n\nAll of this is new.\n"); // U
+  // Past MAX_HL_LINES (10k in app.js): must fall back to plain source with a
+  // notice, the same path any oversized file takes.
+  writeFileSync(
+    join(dir, "docs/huge.svx"),
+    `# Huge\n${"\nfiller paragraph with a {mustache} in it\n".repeat(6000)}`,
+  ); // U
   writeFileSync(join(dir, "data.bin"), Buffer.from(Array.from({ length: 512 }, (_, i) => i % 256))); // U binary
   writeFileSync(join(dir, "ignored.log"), "ignored file\n");
   mkdirSync(join(dir, "ignored-dir"));

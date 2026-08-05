@@ -17,7 +17,7 @@ bin/peruse.js         CLI: registry verbs, args, fd-limit re-exec, URL printing
 server/projects.js    project registry + live worktrees + landing git summaries
 server/index.js       Bun.serve: multi-root routes + git + lazy chokidar→SSE
 web/{index.html,app.js,style.css}   client source
-dist/                 prebuilt client (bun build; auto-rebuilt when stale)
+dist/                 prebuilt single-bundle client (bun build; auto-rebuilt when stale)
 ```
 
 One external runtime dependency: **chokidar** (Bun's native watcher drops
@@ -67,7 +67,7 @@ nor directory), but direct paths through them serve normally.
 
 | Endpoint | Returns |
 |---|---|
-| `GET /` + assets | landing/client bundle from `dist/` (auto-rebuilt at startup if `web/` is newer — checkout runs only) |
+| `GET /` + assets | landing/client bundle from `dist/` (auto-rebuilt at startup if any file recursively below `web/` is newer — checkout runs only) |
 | `GET /api/projects` | registered projects plus live worktrees, missing state, last-opened time, and brief branch/change summary |
 | `GET /p/<name>/` | project viewer client; opening it updates the registered parent's `lastOpened` |
 | `GET /p/<name>/api/tree` | nested JSON tree; per-file git status letter; gitignored flags; per-dir `dirty` flag; ignored dirs listed but not walked; ≤500 entries per dir |
@@ -263,7 +263,40 @@ worktree dropdown in the header, and theme in `localStorage`.
 - **Code**: Shiki dual-theme (`catppuccin-latte`/`mocha`, CSS-variable
   output — theme flips without re-render), ~30 eagerly bundled grammars,
   JS regex engine (no wasm), line numbers via CSS counters. Files >1 MB or
-  >10k lines render plain with a notice.
+  over 10,000 logical lines render plain with a notice; the more expensive
+  mdsvex composite has a 3,500-logical-line ceiling. One terminal LF or CRLF
+  ends the last line without creating another logical line, so terminated and
+  unterminated files share the same boundary. In Chromium, the balanced
+  3,500-logical-line fixture's
+  first eligible `.svx` navigation after app boot measured 626.9–639.7 ms
+  (630.4 ms median), and repeated warm navigation measured 454.3–477.3 ms
+  (455.4 ms median). These are end-to-end render measurements, not a claimed
+  worst-case bound.
+- **mdsvex** (`web/langs/mdsvex.js`): Shiki ships no `.svx` grammar, so peruse
+  defines one — a composite built primarily from `include`s of the bundled
+  Markdown, Svelte, TOML, and embedded-language repositories. Two local rules
+  recognize `+++` TOML frontmatter and stop Svelte's empty-name tag matcher
+  from claiming comparison text. The base grammar is plain Markdown; the
+  Svelte rules ride in as a TextMate **injection**,
+  because Markdown's paragraph rule is a begin/while that owns every
+  continuation line and would hide prose interiors from an ordinary top-level
+  pattern. `<script>`/`<style>` bodies work by re-declaring the Svelte
+  grammar's own injections, which only fire for the root grammar. The eagerly
+  loaded style grammars colorize CSS, SCSS, and PostCSS bodies; other
+  `<style lang>` values remain plain text inside the otherwise highlighted
+  style block. The
+  injection selector's exclusions are load-bearing twice over: they keep
+  mustache rules out of fences and code spans, and they stop the tag rules
+  from re-entering their own captures (unbounded recursion). Markdown's URL
+  and email autolink rules are delegated ahead of generic Svelte tags.
+  Svelte and mdsvex are registered eagerly in the same single bundle as the
+  other grammars. Against main's 2,781,326-byte raw / 421,031-byte gzip bundle,
+  the eager build is 2,807,461 / 426,216 bytes: +26,135 raw / +5,185 gzip
+  (`gzip -9 -n`). That small unconditional cost deliberately avoids a split
+  build lifecycle and first-use chunk failure mode. TOML was already eager for
+  ordinary `.toml` files.
+  `.svx` is always a **code view** — it is not in `isMarkdown`, so it never gets
+  the Rendered/Raw toggle and nothing is ever compiled.
 - **Change marks** (the core interaction):
   - Code: 3 px gutter bars on exactly the changed lines (blue modified,
     green added) and a red wedge at deletion points — the VS Code/JetBrains
@@ -326,7 +359,8 @@ they guard.
   discovery, enumeration cache (TTL, registry-key invalidation, interleaved
   pending coalescing, immutable overlays, target incarnation checks),
   parseHunks, withContext, safePath, buildTree, gitStatus porcelain-v2
-  parsing, web/lib.js helpers, rendered HTML sanitization and compatibility) +
+  parsing, web/lib.js helpers, rendered HTML sanitization and compatibility,
+  mdsvex grammar — per-region token colours measured under both themes) +
   **integration** (`test/integration/`: real server + real git over HTTP —
   encoded multi-root routes, landing data, tree/file/raw contracts, enumeration
   and total Git spawns for a realistic navigation counted through patched
@@ -336,11 +370,13 @@ they guard.
   the composed watcher/cache lifecycle — route invalidation settling a
   scan-broken runtime's pending readiness, runtime-level startup coalescing,
   and SSE stream EOF when a recovered runtime is invalidated).
-- `bun run test:e2e` → **E2E** (`test/e2e/`): five core Chromium journeys —
+- `bun run test:e2e` → **E2E** (`test/e2e/`): six core Chromium journeys —
   smoke, code review (exact marks, popup scope), markdown review (rail
   single-x measurement, innermost marks, arrows, links, pinned headers,
   no body scroll), live updates, theming (Latte/Mocha token + popup color
-  flip) — plus two self-contained regressions, each with its own fixture,
+  flip), mdsvex `.svx` (per-region computed colours in both themes, line-for-line
+  source fidelity, gutter marks and popup, oversized-file fallback) — plus two
+  self-contained regressions, each with its own fixture,
   server, and fresh page: Markdown sanitization (inert hostile HTML alongside
   preserved README/task-list/Shiki rendering in the live DOM) and navigation
   (a silent refresh must not undo an in-flight navigation).

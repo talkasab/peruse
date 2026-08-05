@@ -23,6 +23,8 @@ export const LANG = {
   yml: "yaml",
   md: "markdown",
   markdown: "markdown",
+  // mdsvex source stays a code view — see web/langs/mdsvex.js
+  svx: "mdsvex",
   htm: "html",
   rs: "rust",
   kt: "kotlin",
@@ -76,6 +78,15 @@ export function fmtSize(n) {
     if (n < 1024) return `${n.toFixed(1)} ${u}`;
   }
   return `${n.toFixed(1)} TB`;
+}
+
+/**
+ * A final LF or CRLF terminates the last source line; it does not add an empty one.
+ * @param {string} content
+ * @param {number} limit
+ */
+export function exceedsLineLimit(content, limit) {
+  return content.split("\n").length - Number(content.endsWith("\n")) > limit;
 }
 
 // New-file line range a hunk occupies (deletions anchor to the line above the cut)

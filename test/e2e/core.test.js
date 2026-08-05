@@ -5,7 +5,13 @@ import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test
 import { appendFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { launchBrowser, makeFixtureRepo, startFixtureServer } from "../fixture.js";
+import {
+  launchBrowser,
+  makeFixtureRepo,
+  POST_SVX_EDITED,
+  SVX_HL_LINE_LIMIT,
+  startFixtureServer,
+} from "../fixture.js";
 
 let srv, root, browser, page;
 const T = 30_000;
@@ -270,6 +276,157 @@ describe("theming", () => {
       await page.keyboard.press("Escape");
       // leave the toggle as found: other tests assume the default (latte) theme
       await page.click(".theme-btn");
+    },
+    T,
+  );
+});
+
+describe("mdsvex code view", () => {
+  // Region markers, matched against the rendered line text. Kept in step with
+  // POST_SVX_BASE in fixture.js.
+  const MARKERS = {
+    frontmatter: "title: Release Notes",
+    script: "const items:",
+    prose: "Prose with",
+    component: "<Callout kind=",
+    controlFlow: "{#each items as item",
+    fence: "const answer = 42;",
+    style: ".callout { color:",
+  };
+
+  // Distinct computed colours of the spans on the line carrying each marker.
+  const palettes = (markers) =>
+    page.evaluate((m) => {
+      const lines = [...document.querySelectorAll(".shiki .line")];
+      return Object.fromEntries(
+        Object.entries(m).map(([name, marker]) => {
+          const line = lines.find((l) => l.textContent.includes(marker));
+          const colors = [...(line?.querySelectorAll("span") ?? [])]
+            .filter((s) => s.textContent.trim())
+            .map((s) => getComputedStyle(s).color);
+          return [name, [...new Set(colors)]];
+        }),
+      );
+    }, markers);
+
+  test(
+    "renders as highlighted source with every region visually distinct",
+    async () => {
+      await openFile("docs/post.svx");
+      await page.waitForSelector(".shiki .line");
+      // A code view, never a rendered document — and therefore no Rendered/Raw
+      // toggle, which only markdown gets.
+      expect(await page.locator(".markdown-body").count()).toBe(0);
+      expect(await page.locator("#pane-header button:has-text('Raw')").isVisible()).toBe(false);
+      expect(await page.locator(".notice").count()).toBe(0);
+
+      const latte = await palettes(MARKERS);
+      // Name the region in the assertion so a failure says which one went flat.
+      const multicoloured = Object.entries(latte).map(([name, c]) => [name, c.length > 1]);
+      expect(multicoloured).toEqual(Object.keys(MARKERS).map((name) => [name, true]));
+      // Every region paints a palette no other region paints. The failure mode
+      // of mapping .svx to a single grammar is regions that tokenize fine and
+      // all come out the same default foreground.
+      const signature = (p) => Object.values(p).map((c) => [...c].sort().join(","));
+      expect(new Set(signature(latte)).size).toBe(Object.keys(MARKERS).length);
+
+      // …and the same holds in the other theme, not just after a colour shift.
+      await page.click(".theme-btn");
+      await page.waitForFunction(() => document.documentElement.dataset.theme === "mocha");
+      const mocha = await palettes(MARKERS);
+      expect(new Set(signature(mocha)).size).toBe(Object.keys(MARKERS).length);
+      expect(signature(mocha)).not.toEqual(signature(latte));
+      await page.click(".theme-btn"); // leave the toggle as found
+      await page.waitForFunction(() => document.documentElement.dataset.theme === "latte");
+    },
+    T,
+  );
+
+  test(
+    "TOML frontmatter is visibly tokenized in both themes",
+    async () => {
+      await openFile("docs/toml.svx");
+      await page.waitForSelector(".shiki .line");
+      const titleColors = () =>
+        page.evaluate(() => {
+          const line = [...document.querySelectorAll(".shiki .line")].find((candidate) =>
+            candidate.textContent.includes('title = "TOML Notes"'),
+          );
+          return [
+            ...new Set(
+              [...line.querySelectorAll("span")]
+                .filter((span) => span.textContent.trim())
+                .map((span) => getComputedStyle(span).color),
+            ),
+          ];
+        });
+      const latte = await titleColors();
+      expect(latte.length).toBeGreaterThan(1);
+      await page.click(".theme-btn");
+      await page.waitForFunction(() => document.documentElement.dataset.theme === "mocha");
+      const mocha = await titleColors();
+      expect(mocha.length).toBeGreaterThan(1);
+      expect(mocha).not.toEqual(latte);
+      await page.click(".theme-btn");
+      await page.waitForFunction(() => document.documentElement.dataset.theme === "latte");
+    },
+    T,
+  );
+
+  test(
+    "line numbers align with the source and gutter marks open the usual popup",
+    async () => {
+      await openFile("docs/post.svx");
+      await page.waitForSelector(".line.hl-mod");
+      const rendered = await page.$$eval(".shiki .line", (els) => els.map((l) => l.textContent));
+      // Line numbers are CSS counters over .line, so "aligned" means one .line
+      // per source line, in order, carrying the source's own text.
+      expect(rendered).toEqual(POST_SVX_EDITED.split("\n"));
+
+      const line = page.locator(".line[data-hunk]").first();
+      const box = await line.boundingBox();
+      await page.mouse.click(box.x + 20, box.y + box.height / 2); // gutter, see above
+      await page.waitForSelector(".hunk-popup");
+      expect(await page.locator(".hp-body").innerText()).toContain("const items");
+      await page.keyboard.press("Escape");
+    },
+    T,
+  );
+
+  test(
+    "the mdsvex line boundary is independent of a terminal newline",
+    async () => {
+      for (const [path, renderedLines] of [
+        ["docs/at-limit.svx", SVX_HL_LINE_LIMIT + 1],
+        ["docs/at-limit-unterminated.svx", SVX_HL_LINE_LIMIT],
+      ]) {
+        await openFile(path);
+        await page.waitForSelector(".notice, .shiki .line span");
+        expect(await page.locator(".notice").count()).toBe(0);
+        // Highlighting preserves the terminal newline as an empty final DOM
+        // row even though it does not count as another logical source line.
+        expect(await page.locator(".shiki .line").count()).toBe(renderedLines);
+      }
+
+      for (const path of ["docs/over-limit.svx", "docs/over-limit-unterminated.svx"]) {
+        await openFile(path);
+        await page.waitForSelector(".notice");
+        expect(await page.locator(".shiki .line").count()).toBe(SVX_HL_LINE_LIMIT + 1);
+        expect(await page.locator(".shiki .line span").count()).toBe(0);
+      }
+    },
+    T,
+  );
+
+  test(
+    "a legacy oversized .svx takes the plain-source fallback",
+    async () => {
+      await openFile("docs/huge.svx");
+      await page.waitForSelector(".notice");
+      expect(await page.locator(".notice").innerText()).toContain("syntax highlighting disabled");
+      // plainPre emits bare .line elements with no token spans at all
+      expect(await page.locator(".shiki .line").count()).toBeGreaterThan(10_000);
+      expect(await page.locator(".shiki .line span").count()).toBe(0);
     },
     T,
   );

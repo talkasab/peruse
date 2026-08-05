@@ -4,6 +4,132 @@ Narrative record of work sessions — what changed, what we learned, and why.
 Newest first. (The [CHANGELOG](../CHANGELOG.md) is the user-facing summary;
 this is the engineering story.)
 
+## 2026-08-05 — mdsvex `.svx` highlighting (#18)
+
+`.svx` was falling through to `text`. The issue proposed two options in order:
+map it to the bundled Svelte grammar, or build a small composite. Both were
+measured rather than argued about, by tokenizing a representative `.svx` file
+and printing every token's colour.
+
+- **Svelte alone is not viable.** Script, style, tags, directives and mustaches
+  come out right, but frontmatter, headings, emphasis, links, lists and tables
+  are *all* the default foreground — the whole prose half of the format is
+  invisible. Worse, it actively misreads fenced code: a `{` inside a fenced JS
+  block is claimed as a Svelte mustache, so the rest of the fence tokenizes as
+  an expression. **Markdown alone** is the mirror image: prose and fences are
+  right, every Svelte construct is plain.
+- So: a composite (`web/langs/mdsvex.js`), built mainly from `include`s of the
+  bundled grammars, plus small delimiter/tag-guard rules where their syntax
+  differs. It continues to use the themes' existing scopes.
+- Three things were learned the hard way, all recorded in the file's comments:
+  1. Listing the Svelte rules alongside `text.html.markdown#block` doesn't
+     work. Markdown's `#paragraph` is a begin/**while** rule that owns every
+     continuation line, so nothing listed as a sibling ever sees inside prose.
+     The Svelte rules had to become a TextMate *injection*, which does.
+  2. A grammar's own `injections` map only fires when that grammar is the
+     tokenization root. Svelte embeds `<script lang="ts">` bodies that way, so
+     with `source.mdsvex` as the root the bodies silently stayed plain until
+     mdsvex re-declared those injections. They are reused verbatim; with the
+     app's eager grammar set, script JavaScript/TypeScript and style
+     CSS/SCSS/PostCSS are colorized. Other style languages remain plain inside
+     the block.
+  3. `L:source.mdsvex` alone blows the stack. The tag rules re-tokenize their
+     own begin captures, the injection matches again at the same position, and
+     it recurses forever. Every scope those rules push is excluded in the
+     selector — that list is a correctness fix, not tidiness.
+- One deliberate deviation from Svelte's grammar: its tag rule accepts an empty
+  tag name, so `a < b and 5 > 3` in prose would be eaten as a tag hunting for
+  its `>`. A one-line `match` claims those as text first.
+- Tests measure rather than eyeball, per the practice that has paid off here.
+  The unit suite asserts each region has more than one colour, that no two
+  regions share a palette, and that the output reproduces the source line for
+  line — under both Catppuccin themes. The browser test repeats the palette
+  measurement on `getComputedStyle` in the live DOM. Both would pass trivially
+  on "it produced tokens" and both fail on the real defect, which is regions
+  that tokenize fine and all render the same grey.
+- `bun run test` 94/94, `bun run test:e2e` 14/14, `bun run check` clean.
+  Bundle: +25 KB raw, +4.5 KB gzipped (the Svelte grammar; its embedded
+  JS/TS/CSS were already loaded).
+
+### 2026-08-05 addendum — adversarial fix round
+
+- The base grammar now mirrors Markdown's YAML begin/while frontmatter path for
+  mdsvex `+++` TOML. Browser measurements of the TOML title produced three
+  distinct computed colours in both Latte and Mocha. The Svelte injection also
+  delegates Markdown URL/email autolinks before its generic tag rules; scope
+  probes now report Markdown link scopes while `<a href>`, single-letter and
+  multiline components, and 100-deep nested tags retain Svelte scopes.
+- A `.svx`-specific 3,500-logical-line plain-source boundary replaces the
+  generic 10k limit for this composite. Representative direct highlighting at 3,497 lines
+  took 289 ms (the old 9,026-line case took 705 ms); Chromium rendered the
+  balanced 3,500-logical-line boundary in 481 ms, compared with 562 ms for a 10k-line
+  raw Markdown control. The 3,501-line fixture used plain source in 110 ms.
+- Shiki's post-construction `loadLanguage` plus Bun code splitting now defer
+  Svelte/mdsvex registration and network chunks until the first highlightable
+  `.svx`. The initial JS transfer fell from 2,808,181 to 2,782,177 bytes raw
+  (431,986 to 427,344 gzip); first `.svx` use fetched 26,251 bytes raw / 5,566
+  gzip. TOML was already an eagerly supported standalone grammar, so the new
+  frontmatter include adds no separate startup grammar.
+- Fixtures now cover TOML, both autolink forms, multiline and deeply nested
+  tags, lazy chunk requests, and both sides of the mdsvex line boundary.
+- Final verification: `bun run check` passed; `bun run test` passed 99/99;
+  `bun run test:e2e` passed 16/16 (81 assertions across its two invocations).
+
+### 2026-08-05 addendum — return to the single-bundle build
+
+- The grammar work held up, but the build splitting used to defer roughly 5 KB
+  gzip did not earn its lifecycle complexity. The split builder deleted
+  `dist/chunks` before knowing a replacement build would succeed, exposed
+  missing chunks during a live rebuild, and removed arbitrary files it did not
+  own. A transient build failure could therefore leave `dist/app.js` pointing
+  at chunks that no longer existed. The deliberate tradeoff is to restore
+  main's one-command, single-bundle eager build and static Svelte/mdsvex
+  registration. There is no pre-build cleanup, dynamic import, or `dist/chunks`.
+- Two consecutive eager builds produced byte-identical files and exactly
+  main's five-file layout (`app.js` plus four CSS/HTML assets). With
+  `gzip -9 -n`, main measured 2,781,326 bytes raw / 421,031 gzip and this branch
+  measured 2,807,461 / 426,216: an eager cost of 26,135 raw / 5,185 gzip.
+- Repeating the review's browser shape with no lazy request involved, the first
+  eligible 3,500-logical-line `.svx` navigation after app boot measured 626.9, 630.4,
+  and 639.7 ms; warm navigation measured 454.3, 455.4, and 477.3 ms. Eager
+  loading removed the chunk fetch but did not materially reduce the cold
+  end-to-end result, so the former 481 ms “worst case” claim is withdrawn. The
+  3,500-logical-line cutoff remains the smallest honest mitigation pending issue #8.
+- Checkout freshness now walks regular files recursively below `web/`. A unit
+  regression makes a nested grammar newer than the top-level entry, and a real
+  startup probe with only `web/langs/mdsvex.js` moved forward rebuilt
+  `dist/app.js`; the old immediate-child check did not.
+- Lazy-chunk request assertions were removed. Grammar scopes, TOML/autolink
+  behavior, source fidelity, gutter interaction, and both sides of the cutoff
+  remain covered in unit and Chromium suites.
+- Final gates: `bun run check` passed; unit/integration passed 100/100 (257
+  assertions); the separately invoked browser suites passed 16/16 (78
+  assertions).
+
+### 2026-08-05 addendum — logical-line boundary and supported styles
+
+- The fallback classifier counted `split("\n")` elements, so a conventional
+  newline-terminated 3,500-line file appeared to contain 3,501 lines. The
+  boundary fixture had hidden this by removing its terminal newline. The
+  shared classifier now ignores exactly one terminal LF or CRLF; `.svx` uses
+  the 3,500-line limit and other code uses the same rule at 10,000 lines.
+- The browser fixture now exercises terminated and unterminated `.svx` files
+  at both 3,500 and 3,501 logical lines. Against the old expression, the
+  terminated 3,500-line case took plain fallback and failed immediately with
+  an unexpected notice; after the fix both at-limit shapes highlight and both
+  over-limit shapes render plain. Shiki preserves a terminal newline as an
+  empty final DOM row, independently of fallback classification.
+- Reusing Svelte's injection selectors does not load every grammar they name.
+  With the app's eager set, CSS, SCSS, and transitively available PostCSS style
+  bodies are colorized; LESS, indented Sass, Stylus, and other unloaded style
+  languages remain plain within their block. A two-theme token test verifies
+  the supported palettes, a flat LESS body, and intact surrounding
+  Markdown/Svelte highlighting. Issue #18 already asks for “supported
+  preprocessors,” so its acceptance wording needs no amendment.
+- Final gates: `bun run check` checked 32 files; unit/integration passed
+  103/103 (281 assertions); the separately invoked browser suites passed
+  16/16 (82 assertions).
+
 ## 2026-08-05 — Enumeration cache: 440 git spawns per page load → 0 (#28)
 
 - Every `/p/<name>/…` request resolved its route by re-enumerating projects,

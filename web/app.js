@@ -25,6 +25,7 @@ import langRust from "@shikijs/langs/rust";
 import langScss from "@shikijs/langs/scss";
 import langShell from "@shikijs/langs/shellscript";
 import langSql from "@shikijs/langs/sql";
+import langSvelte from "@shikijs/langs/svelte";
 import langSwift from "@shikijs/langs/swift";
 import langToml from "@shikijs/langs/toml";
 import langTsx from "@shikijs/langs/tsx";
@@ -41,9 +42,10 @@ import footnote from "markdown-it-footnote";
 import taskLists from "markdown-it-task-lists";
 import { createHighlighterCore } from "shiki/core";
 import { createJavaScriptRegexEngine } from "shiki/engine/javascript";
-
+import langMdsvex from "./langs/mdsvex.js";
 import {
   esc,
+  exceedsLineLimit,
   fmtSize,
   hunkRange,
   langForPath as libLangForPath,
@@ -105,7 +107,8 @@ import { createHTMLSanitizer } from "./sanitize.js";
 
 const GUTTER_PX = 64;
 const MAX_HL_SIZE = 1_000_000,
-  MAX_HL_LINES = 10_000;
+  MAX_HL_LINES = 10_000,
+  MAX_SVX_HL_LINES = 3500;
 const IMG_EXTS = new Set(["png", "jpg", "jpeg", "gif", "webp", "ico", "avif", "bmp"]);
 const sanitizeHTML = createHTMLSanitizer(window);
 const routeMatch = location.pathname.match(/^\/p\/([^/]+)\/?$/);
@@ -140,12 +143,14 @@ const highlighter = await createHighlighterCore({
     langScss,
     langShell,
     langSql,
+    langSvelte,
     langSwift,
     langToml,
     langTsx,
     langTs,
     langXml,
     langYaml,
+    langMdsvex,
   ],
   engine: createJavaScriptRegexEngine({ forgiving: true }),
 });
@@ -176,6 +181,12 @@ function hlCode(code, lang) {
   } catch {
     return plainPre(code);
   }
+}
+
+/** @param {TextFile} file */
+function plainFallback(file) {
+  const lineLimit = file.path.toLowerCase().endsWith(".svx") ? MAX_SVX_HL_LINES : MAX_HL_LINES;
+  return file.size > MAX_HL_SIZE || exceedsLineLimit(file.content, lineLimit);
 }
 
 // --- markdown-it, with source line ranges stamped onto rendered blocks ---
@@ -533,7 +544,7 @@ Alpine.data("peruse", () => ({
 
   /** @param {HTMLElement} v @param {TextFile} f */
   renderCode(v, f) {
-    const big = f.size > MAX_HL_SIZE || f.content.split("\n").length > MAX_HL_LINES;
+    const big = plainFallback(f);
     const lang = this.isMarkdown ? "markdown" : langForPath(f.path);
     v.innerHTML = sanitizeHTML(
       (big ? `<div class="notice">Large file — syntax highlighting disabled</div>` : "") +

@@ -67,13 +67,24 @@ import {
 const PKG = join(dirname(fileURLToPath(import.meta.url)), "..");
 const DIST = join(PKG, "dist");
 
+/** Newest regular source-file mtime below a directory, recursively. @param {string} dir */
+export function newestFileMtime(dir) {
+  let newest = 0;
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) newest = Math.max(newest, newestFileMtime(path));
+    else if (entry.isFile()) newest = Math.max(newest, statSync(path).mtimeMs);
+  }
+  return newest;
+}
+
 // Running from a checkout, a git pull must never silently serve a stale
-// client: rebuild dist/ whenever web/ sources are newer. No-op for the npm
-// package and compiled binaries (no web/ shipped).
+// client: rebuild dist/ whenever any web/ source, including a nested grammar,
+// is newer. No-op for the npm package and compiled binaries (no web/ shipped).
 function ensureFreshClient() {
   const webDir = join(PKG, "web");
   if (!existsSync(webDir)) return;
-  const newest = Math.max(...readdirSync(webDir).map((f) => statSync(join(webDir, f)).mtimeMs));
+  const newest = newestFileMtime(webDir);
   const distApp = join(DIST, "app.js");
   if (!existsSync(distApp) || statSync(distApp).mtimeMs < newest) {
     console.error("peruse: client sources newer than dist/ — rebuilding…");
