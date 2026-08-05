@@ -4,6 +4,156 @@ Narrative record of work sessions — what changed, what we learned, and why.
 Newest first. (The [CHANGELOG](../CHANGELOG.md) is the user-facing summary;
 this is the engineering story.)
 
+## 2026-08-05 — Enumeration cache: 440 git spawns per page load → 0 (#28)
+
+- Every `/p/<name>/…` request resolved its route by re-enumerating projects,
+  and enumeration spawns two sequential git processes per registered project.
+  Measured on a synthetic 10-project registry, one markdown-page-shaped load
+  (tree + file + 20 `/raw/` assets) issued **440 enumeration spawns in 131 ms**
+  of request time; with the cache, **0 spawns in 4 ms** (4 git spawns total,
+  all status/diff work for the tree and file requests).
+- The design question was what the key should be. A pure TTL would have made
+  `peruse add`/`rm`/`prune` and `lastOpened` updates briefly invisible, so the
+  **registry snapshot is the key** and the TTL only ages out git-derived
+  worktree discovery. That removes the whole class of "why is my project list
+  stale" bugs and left the default TTL free to be short (2 s), overridable via
+  `PERUSE_ENUM_TTL_MS` or `startServer`'s `enumerationTtlMs`.
+- Caching the *resolved array* would not have helped the case that motivated
+  the issue: a page's 20 asset requests arrive concurrently, so every one of
+  them would still have missed and enumerated. The cache holds the **in-flight
+  promise**, which is what actually collapses the burst — an integration test
+  fires 20 concurrent `/raw/` requests and asserts exactly one enumeration.
+- A cached enumeration can name a target that has since vanished, so route
+  resolution re-`stat`s the path before building a runtime; without that, a
+  deleted project would get a chokidar watcher on a path that is gone instead
+  of a 404.
+- Spawn counting in tests works by patching `Bun.spawn` (it is writable) and
+  counting only argv containing `--show-toplevel` or `worktree` — request-path
+  git calls (`rev-parse --show-prefix`, `status`, `ls-files`, `diff`) never use
+  those, so the count isolates enumeration. The per-enumeration cost is
+  measured at setup rather than assumed: a non-git project costs one spawn, not
+  two, because `rev-parse` fails and the worktree listing is skipped.
+- `bun run test` 77 pass / 0 fail, `bun run test:e2e` 11 pass / 0 fail,
+  `bun run check` clean.
+
+### Adversarial fix-round addendum — 2026-08-05
+
+The “440 → 0” headline above measured only a partial, warmed request shape and
+is superseded by a cold realistic sequence: root, project navigation,
+`/api/projects`, tree, file, and 20 concurrent raw assets across 10 Git repos.
+With settled-result reuse disabled, mandatory in-flight coalescing reduces the
+concurrent asset burst to one enumeration: **100 enumeration / 134 total Git
+spawns**. With the default cache, the same sequence is **20 enumeration / 54
+total Git spawns**. This includes navigation and both enumeration and non-cache
+Git work.
+
+The fix round also made in-flight reuse independent of TTL and starts the TTL
+when enumeration settles; keyed the cache only on canonical project name/path
+identity so `lastOpened` cannot invalidate it mid-navigation; moved TTL timing
+to a monotonic clock; made environment parsing strict; and verifies cached
+linked worktrees by their `.git` gitdir/branch linkage before serving them. A
+recreated unrelated directory now 404s inside the TTL. Focused tests cover all
+of those cases, including the full strict environment-value table. Final
+verification: `bun run check` clean; `bun run test` 81/81; `bun run test:e2e`
+11/11 across the required isolated browser invocations.
+
+### Second adversarial fix-round addendum — 2026-08-05
+
+A second replay found that the first route guard established path/linkage, not
+incarnation: registered roots were accepted unconditionally, and deleting and
+recreating an entire repository could reproduce a linked worktree's gitdir path
+text. Cached targets now carry private filesystem-object identities for the
+served directory and Git administrative directory. The guard covers registered
+Git and non-Git roots as well as linked worktrees. Device/inode/birth-time data
+is deliberately documented as best effort, not a permanent repository UUID: a
+filesystem that supplies no stable identity, or immediately reuses all three,
+can retain stale identity until the short TTL expires.
+
+The same replay exposed three independent cache-state defects. Missing state is
+now recomputed for every listing instead of copied from discovery; cached arrays
+and targets are immutable, with each caller receiving isolated `lastOpened` and
+missing-state overlays; and pending promises are kept per registry key until
+settlement, so A/B/A interleaving still makes only two enumerator calls. Settled
+storage remains one-entry and rejected work is removed. Environment parsing now
+matches the documented canonical contract exactly: only unpadded digit strings
+are accepted, and only exact `0` disables settled reuse.
+
+Regressions reproduce same-path registered-root and full repository/worktree
+replacement, stale missing listings, concurrent metadata snapshots plus caller
+mutation, A/B/A pending interleaving, wall-clock rollback, and the full strict
+environment table. The realistic sequence remains **100 enumeration / 134 total
+Git spawns** with settled reuse disabled and **20 / 54** with the default cache.
+The six report scenarios failed before the second fix and passed afterward.
+Final verification: `bun run check` clean; `bun run test` 87/87 with 272
+assertions; `bun run test:e2e` 11/11 with 54 assertions across the required
+isolated browser invocations.
+
+### Third adversarial fix-round addendum — 2026-08-05
+
+Runtime invalidation previously stopped its ping timer and watcher but left
+every attached SSE response open. A real-CLI regression starts a server with a
+60-second enumeration TTL, opens and consumes the `/api/events` preamble, runs
+`peruse rm` in a separate process, and triggers the removed route. Before the
+fix the next stream read remained pending past the one-second oracle; afterward
+it reached EOF in roughly 52 ms. Teardown now closes each controller, clears the
+client set, and rejects late client attachment through the same closed state, so
+invalidation, listing cleanup, and server stop share one complete lifecycle.
+
+Route reconciliation is target-aware as well as name-aware. A regression
+creates `one/topic` and `two/topic` linked worktrees, opens SSE on
+`project:topic`, removes the first worktree, and waits for the second to inherit
+that route from `project:topic-2`. Refreshing the listing now closes the former
+runtime and its stream rather than retaining it because the route string still
+exists. Each runtime captures the target identity it was created for.
+
+Resolution also re-verifies registry name/path identity, the exact mapped
+runtime, and captured filesystem/Git identity after watcher readiness. Runtime
+startup is coalesced per route so concurrent first requests all await the same
+runtime; this preserves the realistic measurement at **100 enumeration / 134
+total Git spawns** with settled reuse disabled and **20 / 54** with the default
+cache rather than paying a second enumeration for post-await validation.
+Final verification: `bun run check` clean; `bun run test` 89/89 with 281
+assertions; `bun run test:e2e` 11/11 with 54 assertions across the required
+isolated browser invocations.
+
+### Fourth adversarial fix-round addendum — 2026-08-05
+
+The third round's “one complete lifecycle” statement was premature. Per-route
+startup coalescing introduced a `runtimeStarts` map, but `stop()` observed only
+already-mapped runtimes. A start delayed at runtime `git status` therefore
+survived shutdown, created a watcher, and entered the route map afterward.
+Separately, invalidation removed a runtime from the map before its watcher
+close settled, making that close invisible to shutdown; a second `close()` saw
+the boolean closed state and returned before the first teardown finished.
+
+Runtime close is now promise-idempotent: the first call synchronously marks the
+runtime closed, clears ping/flush timers, closes and clears SSE controllers,
+then awaits the watcher; every later call returns that same promise. Detached
+close promises remain in a shutdown-owned set until settlement. `stop()` marks
+the server stopped, force-closes its HTTP listener, and drains pending starts,
+mapped runtimes, and detached closes until none remain. A delayed start checks
+the stopped state before it can be mapped and closes its newly produced
+runtime instead.
+
+The delayed-start and detached-close regressions failed before the fix because
+`stop()` fulfilled inside their independent 75 ms pending oracles. The direct
+double-close regression additionally restored the boolean early return and
+failed because the second call returned a distinct, already-settled promise
+while the first remained pending. With the final implementation restored, the
+three focused paths completed in 98.39 ms, 101.03 ms, and 164.34 ms,
+respectively, including the deliberate 75 ms pending checks; every watcher
+close completed exactly once.
+
+Readiness cancellation remains deliberately outside this branch. Its
+post-ready identity/mapping guard runs only after `ready` settles; issue #17's
+typed `RuntimeClosedError` settlement must land first, and the composed
+pending-ready invalidation regression belongs to that merge phase. This round
+adds no competing readiness resolution or rejection path.
+
+Final gates: `bun run check` checked 31 files; unit/integration passed 92/92
+(295 assertions); the separately invoked browser suites passed 11/11 (54
+assertions).
+
 ## 2026-08-05 (later) — The watcher dead zone was worse, and different, than filed (#17)
 
 Readiness-settlement addendum, 2026-08-05:

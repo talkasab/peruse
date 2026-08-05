@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { appendFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { makeFixtureRepo, startFixtureServer } from "../fixture.js";
 
 let srv, root;
@@ -52,6 +52,48 @@ async function nextEvent(predicate, { timeout = 4000, act, never } = {}) {
 }
 
 describe("SSE change stream", () => {
+  test("project invalidation terminates its existing SSE stream", async () => {
+    const invalidatedRoot = makeFixtureRepo();
+    const invalidated = await startFixtureServer(invalidatedRoot, 7532, {
+      enumerationTtlMs: 60_000,
+    });
+    const response = await fetch(`${invalidated.base}/api/events`);
+    const reader = response.body.getReader();
+    try {
+      const preamble = await reader.read();
+      expect(preamble.done).toBe(false);
+
+      const cli = Bun.spawn(
+        [
+          process.execPath,
+          join(import.meta.dir, "../../bin/peruse.js"),
+          "rm",
+          invalidated.project.name,
+        ],
+        {
+          env: {
+            ...process.env,
+            PERUSE_CONFIG_DIR: dirname(invalidated.configFile),
+            PERUSE_FDS_RAISED: "1",
+          },
+          stdout: "pipe",
+          stderr: "pipe",
+        },
+      );
+      expect(await cli.exited).toBe(0);
+      expect((await fetch(`${invalidated.base}/api/tree`)).status).toBe(404);
+
+      const result = await Promise.race([
+        reader.read().then(({ done }) => (done ? "eof" : "data")),
+        Bun.sleep(1000).then(() => "timeout"),
+      ]);
+      expect(result).toBe("eof");
+    } finally {
+      reader.cancel().catch(() => {});
+      await invalidated.cleanup();
+    }
+  });
+
   test("file change produces a coalesced event naming the path", async () => {
     const ev = await nextEvent((e) => e.changed.includes("README.md"), {
       act: () => appendFileSync(join(root, "README.md"), "\nmore\n"),

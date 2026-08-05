@@ -19,6 +19,14 @@ date and becomes the GitHub release notes (see
   now detects the stalled scan, names the offending link on the console, and
   keeps admitted files live through atomic saves and later poisoned
   subdirectories (#17)
+- Pages no longer run a git process per request per registered project — with
+  several projects registered, a page with many images could start hundreds of
+  them and load slowly. Newly created worktrees still appear in the landing page
+  and switcher within a couple of seconds; deleted or replaced project roots are
+  no longer served from that brief cache window (#28)
+- Live views now disconnect and retry when their project is removed, replaced,
+  or reassigned to another worktree route instead of remaining silently stuck
+  on the obsolete watcher (#28)
 - Registered project roots replaced by files no longer break the project list,
   and `peruse rm` now removes exactly one name-or-canonical-path selection,
   including projects registered through symlinks

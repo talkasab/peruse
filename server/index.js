@@ -12,8 +12,9 @@ import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import chokidar from "chokidar";
 import {
-  enumerateProjects,
+  createProjectEnumerator,
   gitSummary,
+  isCurrentProjectTarget,
   observeMissingProjects,
   pruneProjects,
   readProjects,
@@ -60,6 +61,7 @@ import {
  * @property {string} host
  * @property {boolean} [portFixed]
  * @property {number} [watchBudget]
+ * @property {number} [enumerationTtlMs]
  */
 
 const PKG = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -360,10 +362,17 @@ export function findScanBreakingLinks(root, skip = () => false) {
   return found;
 }
 
-/** @param {string} root @param {number | undefined} watchBudget */
-async function createProjectRuntime(root, watchBudget) {
+/**
+ * @param {string} root
+ * @param {number | undefined} watchBudget
+ * @param {import("./projects.js").ProjectTarget} target
+ */
+export async function createProjectRuntime(root, watchBudget, target) {
   /** @type {Set<ReadableStreamDefaultController<string>>} */
   const clients = new Set();
+  let closed = false;
+  /** @type {Promise<void> | null} */
+  let closePromise = null;
   /** @type {Set<string>} */
   let pendingChanged = new Set(),
     pendingGit = false,
@@ -465,7 +474,6 @@ async function createProjectRuntime(root, watchBudget) {
   const verifyTimers = new Map();
   /** @type {ReturnType<typeof setInterval> | null} */
   let stallTimer = null;
-  let closed = false;
   let recoveryActive = false;
 
   // Path skips shared by the watcher's ignore callback and the fallback
@@ -709,24 +717,45 @@ async function createProjectRuntime(root, watchBudget) {
 
   return {
     root,
-    clients,
+    target,
     rememberIgnored,
     ready,
     get closed() {
       return closed;
     },
-    async close() {
-      if (!closed) {
-        closed = true;
-        readyReject(new RuntimeClosedError());
+    /** @param {ReadableStreamDefaultController<string>} client */
+    addClient(client) {
+      if (closed) {
+        client.close();
+        return false;
       }
-      clearInterval(pingTimer);
-      if (stallTimer) clearInterval(stallTimer);
-      if (flushTimer) clearTimeout(flushTimer);
-      for (const timer of reconcileTimers.values()) clearTimeout(timer);
-      for (const timer of verifyTimers.values()) clearTimeout(timer);
-      for (const handle of fallbackWatchers.values()) handle.close();
-      await watcher?.close();
+      clients.add(client);
+      return true;
+    },
+    /** @param {ReadableStreamDefaultController<string>} client */
+    removeClient(client) {
+      clients.delete(client);
+    },
+    close() {
+      if (!closePromise)
+        closePromise = (async () => {
+          closed = true;
+          readyReject(new RuntimeClosedError());
+          clearInterval(pingTimer);
+          if (stallTimer) clearInterval(stallTimer);
+          if (flushTimer) clearTimeout(flushTimer);
+          for (const timer of reconcileTimers.values()) clearTimeout(timer);
+          for (const timer of verifyTimers.values()) clearTimeout(timer);
+          for (const client of clients) {
+            try {
+              client.close();
+            } catch {}
+          }
+          clients.clear();
+          for (const handle of fallbackWatchers.values()) handle.close();
+          await watcher?.close();
+        })();
+      return closePromise;
     },
   };
 }
@@ -740,6 +769,7 @@ export async function startServer({
   host,
   portFixed = false,
   watchBudget,
+  enumerationTtlMs,
 }) {
   ensureFreshClient();
   const initialProjects =
@@ -754,29 +784,121 @@ export async function startServer({
         ]
       : null);
   const registry = () => initialProjects ?? readProjects(configFile);
+  const enumerate = createProjectEnumerator({ ttlMs: enumerationTtlMs });
   /** @type {Map<string, Awaited<ReturnType<typeof createProjectRuntime>>>} */
   const runtimes = new Map();
+  /** @type {Map<string, Promise<Awaited<ReturnType<typeof createProjectRuntime>>>>} */
+  const runtimeStarts = new Map();
+  /** @type {Set<Promise<void>>} */
+  const runtimeCloses = new Set();
+  let stopped = false;
+
+  /** @param {import("./projects.js").ProjectTarget | undefined} target */
+  const targetIsCurrent = (target) =>
+    !!target &&
+    !target.missing &&
+    !!statSync(target.path, { throwIfNoEntry: false })?.isDirectory() &&
+    isCurrentProjectTarget(target);
+
+  /**
+   * @param {Awaited<ReturnType<typeof createProjectRuntime>>} runtime
+   * @param {import("./projects.js").ProjectTarget | undefined} target
+   */
+  const runtimeMatchesTarget = (runtime, target) =>
+    !!target && runtime.root === target.path && isCurrentProjectTarget(runtime.target);
+
+  /**
+   * @param {string} routeName
+   * @param {Awaited<ReturnType<typeof createProjectRuntime>>} runtime
+   */
+  function closeRuntime(routeName, runtime) {
+    if (runtimes.get(routeName) === runtime) runtimes.delete(routeName);
+    const closing = runtime.close();
+    runtimeCloses.add(closing);
+    void closing.then(
+      () => runtimeCloses.delete(closing),
+      () => runtimeCloses.delete(closing),
+    );
+    return closing;
+  }
+
+  /** @param {import("./projects.js").ProjectEntry[]} projects */
+  const registryIdentity = (projects) =>
+    JSON.stringify(
+      projects
+        .map((project) => ({ name: project.name, path: resolve(project.path) }))
+        .sort((a, b) => a.name.localeCompare(b.name) || a.path.localeCompare(b.path)),
+    );
 
   /** @param {string} routeName */
   async function resolveProject(routeName) {
-    const targets = await enumerateProjects(registry());
+    if (stopped) return null;
+    const projects = registry();
+    const identity = registryIdentity(projects);
+    const targets = await enumerate(projects);
+    if (stopped) return null;
     const target = targets.find((candidate) => candidate.routeName === routeName);
-    if (!target || target.missing) return null;
+    // Enumeration is cached briefly, so validate both existence and target
+    // incarnation before reusing or creating a runtime.
+    if (!target || !targetIsCurrent(target)) {
+      const stale = runtimes.get(routeName);
+      if (stale) await closeRuntime(routeName, stale);
+      return null;
+    }
     let runtime = runtimes.get(routeName);
-    if (!runtime || runtime.root !== target.path) {
-      await runtime?.close();
-      runtime = await createProjectRuntime(target.path, watchBudget);
-      runtimes.set(routeName, runtime);
+    if (!runtime || !runtimeMatchesTarget(runtime, target)) {
+      if (runtime) await closeRuntime(routeName, runtime);
+      let starting = runtimeStarts.get(routeName);
+      if (!starting) {
+        starting = (async () => {
+          const created = await createProjectRuntime(target.path, watchBudget, target);
+          if (stopped) await closeRuntime(routeName, created);
+          return created;
+        })();
+        runtimeStarts.set(routeName, starting);
+        void starting.then(
+          () => {
+            if (runtimeStarts.get(routeName) === starting) runtimeStarts.delete(routeName);
+          },
+          () => {
+            if (runtimeStarts.get(routeName) === starting) runtimeStarts.delete(routeName);
+          },
+        );
+      }
+      runtime = await starting;
+      if (stopped) {
+        await closeRuntime(routeName, runtime);
+        return null;
+      }
+      const mapped = runtimes.get(routeName);
+      if (mapped) {
+        if (mapped !== runtime) await closeRuntime(routeName, runtime);
+        runtime = mapped;
+      } else {
+        runtimes.set(routeName, runtime);
+      }
     }
     try {
       await runtime.ready;
     } catch (error) {
+      // Readiness rejection means the runtime closed before its watcher scan
+      // finished; there is no successful state to re-verify below.
       if (!(error instanceof RuntimeClosedError)) throw error;
-      if (runtimes.get(routeName) === runtime) runtimes.delete(routeName);
+      if (runtimes.get(routeName) === runtime) await closeRuntime(routeName, runtime);
       return null;
     }
-    if (runtime.closed) {
-      if (runtimes.get(routeName) === runtime) runtimes.delete(routeName);
+    // Registry identity or target incarnation can change while watcher startup
+    // is pending. Never return a runtime that was unmapped, closed, or
+    // superseded across that asynchronous boundary.
+    if (
+      stopped ||
+      runtime.closed ||
+      runtimes.get(routeName) !== runtime ||
+      registryIdentity(registry()) !== identity ||
+      !targetIsCurrent(target) ||
+      !runtimeMatchesTarget(runtime, target)
+    ) {
+      if (runtimes.get(routeName) === runtime) await closeRuntime(routeName, runtime);
       return null;
     }
     return { target, runtime };
@@ -789,14 +911,14 @@ export async function startServer({
     const projects = configFile
       ? pruneProjects({ file: configFile }).kept
       : (fixedProjects ?? (root ? registry() : observeMissingProjects()));
-    const targets = await enumerateProjects(projects);
-    const activeRoutes = new Set(
-      targets.filter((target) => !target.missing).map((target) => target.routeName),
+    const targets = await enumerate(projects);
+    const activeTargets = new Map(
+      targets.filter(targetIsCurrent).map((target) => [target.routeName, target]),
     );
     for (const [routeName, runtime] of runtimes) {
-      if (activeRoutes.has(routeName)) continue;
-      await runtime.close();
-      runtimes.delete(routeName);
+      const target = activeTargets.get(routeName);
+      if (target && runtimeMatchesTarget(runtime, target)) continue;
+      await closeRuntime(routeName, runtime);
     }
     return Promise.all(
       targets.map(async (target) => ({
@@ -899,11 +1021,10 @@ export async function startServer({
             const stream = new ReadableStream({
               start(c) {
                 ctrl = c;
-                runtime.clients.add(c);
-                c.enqueue("retry: 1000\n\n");
+                if (runtime.addClient(c)) c.enqueue("retry: 1000\n\n");
               },
               cancel() {
-                if (ctrl) runtime.clients.delete(ctrl);
+                if (ctrl) runtime.removeClient(ctrl);
               },
             });
             return new Response(stream, {
@@ -947,10 +1068,32 @@ export async function startServer({
     await Promise.all([...runtimes.values()].map((runtime) => runtime.close()));
     throw err;
   }
-  // stop() is for tests and embedders; the CLI just exits.
-  const stop = async () => {
-    await Promise.all([...runtimes.values()].map((runtime) => runtime.close()));
-    server.stop(true);
+  /** Drain until no start can produce a runtime and every watcher close has settled. */
+  const drainRuntimes = async () => {
+    let failure;
+    for (;;) {
+      const work = [
+        ...runtimeStarts.values(),
+        ...[...runtimes].map(([routeName, runtime]) => closeRuntime(routeName, runtime)),
+        ...runtimeCloses,
+      ];
+      if (work.length === 0) break;
+      for (const result of await Promise.allSettled(work))
+        if (result.status === "rejected" && failure === undefined) failure = result.reason;
+    }
+    if (failure !== undefined) throw failure;
+  };
+  /** @type {Promise<void> | null} */
+  let stopPromise = null;
+  // stop() is for tests and embedders; the CLI just exits. Mark stopped and
+  // reject new HTTP work before draining all runtime starts and closes.
+  const stop = () => {
+    if (!stopPromise) {
+      stopped = true;
+      server.stop(true);
+      stopPromise = drainRuntimes();
+    }
+    return stopPromise;
   };
   return { port: server.port, host, stop };
 }

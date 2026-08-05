@@ -75,12 +75,55 @@ nor directory), but direct paths through them serve normally.
 | `GET /p/<name>/raw/<path>` | raw bytes, correct MIME (images, markdown assets) |
 | `GET /p/<name>/api/events` | project-scoped SSE change stream |
 
-Worktrees are discovered fresh with `git worktree list --porcelain` whenever
-the project model is requested or a route is resolved. They are grouped under
+Worktrees are discovered with `git worktree list --porcelain` whenever the
+project model is requested or a route is resolved. They are grouped under
 their registered parent and receive transient `<parent>:<branch-or-directory>`
 route names; they never enter `projects.json`. If the registered path is below
 the repository root, the equivalent subdirectory is selected in each linked
 worktree, so discovery never broadens the directory the user chose to expose.
+
+### Enumeration cache
+
+Enumeration costs two sequential git spawns per registered project
+(`rev-parse --show-toplevel`, `worktree list --porcelain`), and every request
+under `/p/<name>/` resolves its route through it. Each server memoizes one
+settled enumeration plus currently pending identity keys (issue #28):
+
+- The cache key is the sorted set of canonical **project name/path identities**.
+  `add`, `rm`, `prune`, renames, path changes, and another process's identity
+  edits invalidate immediately; `lastOpened` and missing-state bookkeeping do
+  not discard identical Git discovery work during navigation.
+- A settled result ages out after a 2 s TTL measured with a monotonic clock.
+  `PERUSE_ENUM_TTL_MS` accepts only canonical, unpadded non-negative integer
+  strings; blank, whitespace-padded, signed, negative, or malformed values use
+  the default. Exact `0` disables settled-result reuse. `startServer`'s
+  `enumerationTtlMs` option provides the same numeric override for tests and
+  embedders.
+- Pending promises are retained by identity key and reused regardless of
+  elapsed time, including when keys interleave or the configured TTL is 0.
+  Each pending entry is removed when it settles, its TTL starts at that point,
+  and a rejection is never retained.
+- Cached discovery arrays and targets are immutable. Every request receives
+  copies with current `lastOpened` and filesystem-derived missing state, so
+  concurrent registry snapshots and callers cannot mutate shared cache data.
+- Route resolution validates every target against private filesystem-object
+  identities (device/inode/birth time). Git targets additionally retain their
+  administrative-directory object and `.git` linkage; named linked worktrees
+  retain the branch ref. This rejects normal same-path replacement of plain
+  roots, repositories, and linked worktrees inside the TTL. It is a best-effort
+  incarnation signal rather than a persistent repository UUID: a filesystem
+  that reports no stable identity, or reuses the same inode and birth time
+  inside the TTL, can leave a residual stale window until fresh enumeration.
+- Runtime resolution re-verifies the unchanged registry identity, mapped
+  runtime, and target incarnation after watcher readiness settles. Project
+  listing reconciliation compares each route's enumerated target with the
+  runtime's captured path and identity—not only the route name—so collision
+  suffix reassignment closes a runtime that belongs to the former target.
+
+The integration measurement uses a cold 10-repository registry and the real
+request sequence (root, project navigation, `/api/projects`, tree, file, and 20
+concurrent raw assets). Disabling settled-result reuse costs 100 enumeration / 134
+total Git spawns; the default cache costs 20 enumeration / 54 total spawns.
 
 ### Git
 
@@ -137,8 +180,21 @@ Robustness (each learned from a real failure):
   request resolution converts only that signal to not-found and rechecks the
   closed state after a fulfilled wait, so awaiters neither hang nor receive a
   closed runtime. The readiness rejection has a permanent observer so closing
-  an unused runtime cannot emit an unhandled rejection. Server shutdown closes
-  every watcher, fallback watch, reconciliation timer, and ping timer.
+  an unused runtime cannot emit an unhandled rejection. Runtime
+  teardown clears its ping, pending-flush, and recovery timers, closes and
+  forgets every attached SSE controller, closes its fallback watches, then
+  awaits watcher close. Every caller receives
+  the same close promise. Route invalidation and listing reconciliation remove
+  the runtime from the route map immediately but keep that promise registered;
+  the ended response lets browser `EventSource` reconnect to the route's
+  current runtime (or receive its current not-found response) instead of
+  remaining attached to a silent obsolete watcher.
+- Server shutdown first marks the lifecycle stopped and force-closes the HTTP
+  listener, then drains pending runtime starts, mapped runtimes, and detached
+  close promises until all three sets are empty. A start that finishes after
+  shutdown begins closes its produced runtime before resolving and can never
+  enter the route map. Consequently `await stop()` means no watcher startup or
+  teardown remains in flight.
 - Stall watchdog (issue #17). chokidar's scanner resolves every symlink it
   meets with `realpath()` and survives only ENOENT/EPERM/EACCES/ELOOP; any
   other errno (ENOTDIR in practice — a link pointing *through* a regular
@@ -267,10 +323,14 @@ Regression assertions are tagged with the commit that fixed the incident
 they guard.
 
 - `bun run test` → **unit** (`test/unit/`: project registry/pruning/worktree
-  discovery, parseHunks, withContext, safePath, buildTree, gitStatus porcelain-v2
+  discovery, enumeration cache (TTL, registry-key invalidation, interleaved
+  pending coalescing, immutable overlays, target incarnation checks),
+  parseHunks, withContext, safePath, buildTree, gitStatus porcelain-v2
   parsing, web/lib.js helpers, rendered HTML sanitization and compatibility) +
   **integration** (`test/integration/`: real server + real git over HTTP —
-  encoded multi-root routes, landing data, tree/file/raw contracts, SSE coalescing and gitignore-skip,
+  encoded multi-root routes, landing data, tree/file/raw contracts, enumeration
+  and total Git spawns for a realistic navigation counted through patched
+  `Bun.spawn`, cached target identity/missing state, SSE coalescing and gitignore-skip,
   idle-connection survival, port fallback, tiny-watch-budget survival,
   non-git degradation).
 - `bun run test:e2e` → **E2E** (`test/e2e/`): five core Chromium journeys —
