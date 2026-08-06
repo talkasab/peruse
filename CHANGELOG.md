@@ -11,6 +11,11 @@ date and becomes the GitHub release notes (see
 
 ## [Unreleased]
 
+### Added
+- Browser tabs now identify the server machine and selected project or
+  parent-qualified worktree route, staying accurate through rapid switches and
+  project removal (#33)
+
 ## [1.0.1] - 2026-08-06
 
 ### Fixed

@@ -4,6 +4,56 @@ Narrative record of work sessions — what changed, what we learned, and why.
 Newest first. (The [CHANGELOG](../CHANGELOG.md) is the user-facing summary;
 this is the engineering story.)
 
+## 2026-08-06 — Server and project context in page titles (#33)
+
+- `/api/projects` now carries the server's `os.hostname()` so browsers opened
+  through localhost, LAN, or other addresses all identify the actual server
+  machine consistently.
+- The client retains plain `peruse` while that payload is pending, then uses
+  `peruse - <hostname>` on the landing page and appends the selected project or
+  worktree name. Switcher navigation updates immediately; a route absent
+  from the current listing falls back to the landing form.
+- The focused Chromium regression was red on the static title: the first
+  resolved landing assertion expected `peruse - oidm-dev` and received
+  `peruse` (0 passed, 1 failed; 3 assertions reached). Final Chromium values
+  were `peruse` before data, `peruse - oidm-dev` on landing,
+  `peruse - oidm-dev - alpha` after opening a project,
+  `peruse - oidm-dev - beta` after switching projects,
+  `peruse - oidm-dev - topic` after selecting its linked worktree, and the
+  landing title again after navigating home; no observed title contained
+  `undefined` or `null`.
+- Final gates: `bun run check` checked 37 files with both typecheck targets
+  clean; `bun run test` passed 144/144 with 425 assertions; and
+  `bun run test:e2e` passed 35/35 with 385 assertions (1/9 in the isolated
+  switcher process and 34/376 in the main process).
+
+### 2026-08-06 addendum — parent-qualified and failure-honest titles
+
+- Independent review found four gaps in the first round: worktrees used the
+  branch-only display name, a same-tick A → B request from B lost the final B,
+  unavailable project pages had no title, and live project removal left stale
+  title/switcher context. The switcher race predates #33: its immutable
+  comparison with the page's initial route came from the original
+  multi-project switcher and is present on main at `fd227a9`.
+- Titles now use the selected `routeName`, so the linked worktree measures
+  `peruse - oidm-dev - beta:topic`. Switcher navigation records the latest
+  requested route; the deterministic A → B flip finishes at `/p/beta/` with
+  `peruse - oidm-dev - beta`. The new worktree assertion was red by timing out
+  on round 1's `topic` title (0/1, 5 assertions reached), and the rapid-switch
+  assertion was separately red at `/p/alpha/` instead of `/p/beta/` (0/1, 6
+  assertions reached).
+- An unavailable project-page route now returns a minimal HTML 404 with
+  `peruse - oidm-dev` and a one-line `project not found` body; project API
+  routes retain their plain 404. When an open project disappears, the first
+  EventSource error in a failure streak refetches `/api/projects` once. The
+  measured client removed the stale switcher option and changed to
+  `peruse - oidm-dev` while retaining its `/p/alpha/` URL and rendered Alpha
+  content; repeated 404 reconnects produced no additional project refetch.
+- Final fix-round gates: `bun run check` checked 37 files with both typecheck
+  targets clean; `bun run test` passed 144/144 with 428 assertions; and
+  `bun run test:e2e` passed 35/35 with 395 assertions (1/19 in the isolated
+  switcher process and 34/376 in the main process).
+
 ## 2026-08-06 — Every Markdown change gets a reachable mark (#24)
 
 - Reproduced the collapse with one fixture containing seven separated edits

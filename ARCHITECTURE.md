@@ -68,8 +68,8 @@ nor directory), but direct paths through them serve normally.
 | Endpoint | Returns |
 |---|---|
 | `GET /` + assets | landing/client bundle from `dist/` (auto-rebuilt at startup if any file recursively below `web/` is newer — checkout runs only) |
-| `GET /api/projects` | registered projects plus live worktrees, missing state, last-opened time, and brief branch/change summary |
-| `GET /p/<name>/` | project viewer client; opening it updates the registered parent's `lastOpened` |
+| `GET /api/projects` | server `os.hostname()`, plus registered projects and live worktrees with missing state, last-opened time, and brief branch/change summary |
+| `GET /p/<name>/` | project viewer client; opening it updates the registered parent's `lastOpened`; an unavailable route returns a minimal hostname-titled HTML 404 |
 | `GET /p/<name>/api/tree` | nested JSON tree; per-file git status letter; gitignored flags; per-dir `dirty` flag; ignored dirs listed but not walked; ≤500 entries per dir |
 | `GET /p/<name>/api/file?path=` | text content, size, binary flag, status, hunks |
 | `GET /p/<name>/raw/<path>` | raw bytes, correct MIME (images, markdown assets) |
@@ -239,6 +239,19 @@ worktrees. At `/p/<name>/`, state is tree + flattened visible rows
 (depth-annotated), selection via `location.hash` (`#/path`), a grouped project /
 worktree dropdown in the header, and theme + word-wrap preference in
 `localStorage`.
+
+The document title is `peruse - <server hostname>` on the landing page and
+adds ` - <route name>` for a selected project or worktree. A worktree therefore
+keeps its parent context (`parent:branch`) rather than using the ambiguous
+branch-only display name. The title remains plain `peruse` until `/api/projects`
+supplies the hostname. Same-tick switcher changes track the latest requested
+route, so the final selection wins even before navigation commits. A direct
+unavailable project-page route returns a minimal HTML 404 with the landing
+title and a one-line `project not found` body. If an open project disappears,
+the first EventSource error in that failure streak refreshes `/api/projects`
+once, removes stale switcher state, and recomputes the landing title without
+navigating away from the already-rendered content; repeated 404 reconnects do
+not create a refetch loop.
 
 - **Tree**: VS Code explorer conventions — uniform 24 px rows, rotating
   chevrons (only on expandable dirs), folder/file SVG-mask icons, indent

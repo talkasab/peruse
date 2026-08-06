@@ -250,7 +250,9 @@ Alpine.data("peruse", () => ({
   nav: 0,
   wanted: /** @type {string | null} */ (null),
   projects: /** @type {ProjectView[]} */ ([]),
+  hostname: "",
   projectName,
+  requestedProject: projectName,
 
   async init() {
     this.theme =
@@ -258,10 +260,7 @@ Alpine.data("peruse", () => ({
       (matchMedia("(prefers-color-scheme: dark)").matches ? "mocha" : "latte");
     this.applyTheme();
     this.wrap = localStorage.getItem("peruse-wrap") === "true";
-    const listing = /** @type {{projects: ProjectView[]}} */ (
-      await (await fetch("/api/projects")).json()
-    );
-    this.projects = listing.projects;
+    await this.refreshProjects();
     if (!this.projectName) return;
     this.$refs.viewer.addEventListener("click", (e) => this.viewerClick(e));
     // reflow (pane resize, images loading) moves blocks → re-lay the rail
@@ -301,9 +300,29 @@ Alpine.data("peruse", () => ({
   projectHref(routeName) {
     return `/p/${encodeURIComponent(routeName)}/`;
   },
+  async refreshProjects() {
+    const listing = /** @type {{hostname: string, projects: ProjectView[]}} */ (
+      await (await fetch("/api/projects")).json()
+    );
+    this.projects = listing.projects;
+    this.hostname = listing.hostname;
+    this.updateTitle(this.projectName);
+  },
+  /** @param {string | null} routeName */
+  updateTitle(routeName) {
+    if (!this.hostname) return;
+    const project = this.projects.find(
+      (candidate) => candidate.routeName === routeName && !candidate.missing,
+    );
+    document.title = `peruse - ${this.hostname}${project ? ` - ${project.routeName}` : ""}`;
+  },
   /** @param {string} routeName */
   switchProject(routeName) {
-    if (routeName && routeName !== this.projectName) location.href = this.projectHref(routeName);
+    if (routeName && routeName !== this.requestedProject) {
+      this.requestedProject = routeName;
+      this.updateTitle(routeName);
+      location.href = this.projectHref(routeName);
+    }
   },
   /** @param {string} value */
   formatOpened(value) {
@@ -840,6 +859,7 @@ Alpine.data("peruse", () => ({
   // ---- live updates ----
   connect() {
     const es = new EventSource(`${projectBase}/api/events`);
+    let recoveryRequested = false;
     es.onmessage = (ev) => {
       const d = /** @type {ChangeEvent} */ (JSON.parse(ev.data));
       this.refreshTree();
@@ -847,8 +867,14 @@ Alpine.data("peruse", () => ({
         this.selectFile(this.file.path, { preserve: true });
     };
     es.onopen = () => {
+      recoveryRequested = false;
       this.refreshTree();
       if (this.file) this.selectFile(this.file.path, { preserve: true });
+    };
+    es.onerror = () => {
+      if (recoveryRequested) return;
+      recoveryRequested = true;
+      void this.refreshProjects().catch(() => {});
     };
   },
 

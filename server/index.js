@@ -8,6 +8,7 @@ import {
   realpathSync,
   statSync,
 } from "node:fs";
+import { hostname } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import chokidar from "chokidar";
@@ -66,6 +67,15 @@ import {
 
 const PKG = join(dirname(fileURLToPath(import.meta.url)), "..");
 const DIST = join(PKG, "dist");
+const SERVER_HOSTNAME = hostname();
+const PROJECT_NOT_FOUND_HTML = `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>peruse - ${escapeHTML(SERVER_HOSTNAME)}</title></head>
+<body>project not found</body></html>`;
+
+/** @param {string} value */
+function escapeHTML(value) {
+  return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+}
 
 /** Newest regular source-file mtime below a directory, recursively. @param {string} dir */
 export function newestFileMtime(dir) {
@@ -953,7 +963,8 @@ export async function startServer({
         const url = new URL(req.url);
         const { pathname } = url;
 
-        if (pathname === "/api/projects") return json({ projects: await projectListing() });
+        if (pathname === "/api/projects")
+          return json({ hostname: SERVER_HOSTNAME, projects: await projectListing() });
 
         const match = pathname.match(/^\/p\/([^/]+)(\/.*)?$/);
         if (match) {
@@ -963,11 +974,17 @@ export async function startServer({
           } catch {
             return new Response("not found", { status: 404 });
           }
+          const tail = match[2] ?? "/";
           const selected = await resolveProject(routeName);
-          if (!selected) return new Response("project not found", { status: 404 });
+          if (!selected)
+            return tail === "/"
+              ? new Response(PROJECT_NOT_FOUND_HTML, {
+                  status: 404,
+                  headers: { "Content-Type": "text/html; charset=utf-8" },
+                })
+              : new Response("project not found", { status: 404 });
           const { target, runtime } = selected;
           const projectRoot = target.path;
-          const tail = match[2] ?? "/";
 
           if (tail === "/") {
             if (configFile) {

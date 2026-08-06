@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { startServer } from "../../server/index.js";
 import { registerProject, registryPath } from "../../server/projects.js";
@@ -44,10 +44,16 @@ describe("multi-root HTTP routing", () => {
     expect(html).toContain('class="landing"');
     expect(html).toContain('class="project-card"');
     const listing = await (await fetch(`${origin}/api/projects`)).json();
+    expect(listing.hostname).toBe(hostname());
     const online = listing.projects.find((project) => project.name === named.name);
     const missing = listing.projects.find((project) => project.name === "Offline disk");
     expect(online).toMatchObject({ missing: false, kind: "project" });
     expect(missing).toMatchObject({ missing: true, kind: "project", summary: null });
-    expect((await fetch(`${origin}/p/Offline%20disk/`)).status).toBe(404);
+    const missingPage = await fetch(`${origin}/p/Offline%20disk/`);
+    expect(missingPage.status).toBe(404);
+    expect(missingPage.headers.get("content-type")).toBe("text/html; charset=utf-8");
+    const missingHTML = await missingPage.text();
+    expect(missingHTML).toContain(`<title>peruse - ${hostname()}</title>`);
+    expect(missingHTML).toContain("<body>project not found</body>");
   });
 });
