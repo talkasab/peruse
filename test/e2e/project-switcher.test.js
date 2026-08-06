@@ -21,7 +21,7 @@ function git(cwd, ...args) {
 }
 
 test(
-  "page title follows landing and project context while the switcher selects its route",
+  "page title and branch state follow the switcher, landing, and project removal",
   async () => {
     const root = mkdtempSync(join(tmpdir(), "peruse-switcher-e2e-"));
     const configDir = mkdtempSync(join(tmpdir(), "peruse-switcher-config-"));
@@ -40,7 +40,7 @@ test(
     git(beta, "worktree", "add", "-qb", "topic", worktree);
 
     const configFile = registryPath(configDir);
-    const first = registerProject(alpha, { file: configFile });
+    const alphaProject = registerProject(alpha, { file: configFile });
     const parent = registerProject(beta, { file: configFile });
     const routeName = `${parent.name}:topic`;
 
@@ -82,8 +82,8 @@ test(
       await missingPage.close();
 
       await page.locator(".project-primary").first().click();
-      await page.waitForURL(`**/p/${encodeURIComponent(first.name)}/`);
-      const firstTitle = `peruse - ${hostname()} - ${first.name}`;
+      await page.waitForURL(`**/p/${encodeURIComponent(alphaProject.name)}/`);
+      const firstTitle = `peruse - ${hostname()} - ${alphaProject.name}`;
       await page.waitForFunction((title) => document.title === title, firstTitle);
       expect(await page.title()).toBe(firstTitle);
 
@@ -102,7 +102,7 @@ test(
           app.switchProject(firstRoute);
           app.switchProject(finalRoute);
         },
-        { firstRoute: first.name, finalRoute: parent.name },
+        { firstRoute: alphaProject.name, finalRoute: parent.name },
       );
       await page.waitForTimeout(750);
       expect(new URL(page.url()).pathname).toBe(`/p/${encodeURIComponent(parent.name)}/`);
@@ -114,6 +114,23 @@ test(
       await page.waitForFunction((title) => document.title === title, worktreeTitle);
       expect(await page.locator(".project-switcher").inputValue()).toBe(routeName);
       expect(await page.title()).toBe(worktreeTitle);
+      expect(await page.locator(".branch-state").innerText()).toBe("topic");
+
+      await page.selectOption(".project-switcher", parent.name);
+      await page.waitForURL(
+        `http://127.0.0.1:${server.port}/p/${encodeURIComponent(parent.name)}/`,
+      );
+      await page.waitForFunction(
+        () => document.querySelector(".branch-state")?.textContent === "master",
+      );
+      expect(await page.locator(".branch-state").innerText()).toBe("master");
+
+      await page.selectOption(".project-switcher", alphaProject.name);
+      await page.waitForURL(
+        `http://127.0.0.1:${server.port}/p/${encodeURIComponent(alphaProject.name)}/`,
+      );
+      await page.waitForFunction(() => document.querySelector("#tree .row"));
+      expect(await page.locator(".branch-state").isVisible()).toBe(false);
 
       await page.locator(".brand").click();
       await page.waitForURL(`http://127.0.0.1:${server.port}/`);
@@ -123,7 +140,7 @@ test(
       expect(await page.title()).not.toMatch(/undefined|null/);
 
       await page.locator(".project-primary").first().click();
-      await page.waitForURL(`**/p/${encodeURIComponent(first.name)}/`);
+      await page.waitForURL(`**/p/${encodeURIComponent(alphaProject.name)}/`);
       await page.locator("#tree .row", { hasText: "README.md" }).click();
       await page.waitForFunction(() =>
         document.querySelector("#viewer")?.textContent?.includes("Alpha"),
@@ -133,7 +150,7 @@ test(
       page.on("request", (request) => {
         if (new URL(request.url()).pathname === "/api/projects") projectRefreshes++;
       });
-      expect(removeProject(first.name, configFile)).toBe(1);
+      expect(removeProject(alphaProject.name, configFile)).toBe(1);
       await fetch(`http://127.0.0.1:${server.port}/api/projects`);
       await page.waitForFunction((title) => document.title === title, landingTitle, {
         timeout: 8_000,
@@ -143,7 +160,7 @@ test(
           ![...document.querySelectorAll(".project-switcher option")].some(
             (option) => option.value === route,
           ),
-        first.name,
+        alphaProject.name,
       );
       await page.waitForTimeout(1_500);
       expect(projectRefreshes).toBe(1);

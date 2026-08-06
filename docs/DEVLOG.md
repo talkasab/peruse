@@ -4,6 +4,75 @@ Narrative record of work sessions — what changed, what we learned, and why.
 Newest first. (The [CHANGELOG](../CHANGELOG.md) is the user-facing summary;
 this is the engineering story.)
 
+## 2026-08-06 — Local branch state in the viewer header (#15)
+
+- The primary Chromium regression created `feature/branch-state` one commit
+  ahead of local `main` and failed twice on released code because no branch
+  indicator existed. The completed journey measures exact text through live
+  transitions: `feature/branch-state · 1 ahead` → `main` → detached `@ <short
+  oid>` → the feature branch again → `feature/branch-state · 2 ahead` after a
+  new commit.
+- Git identity now comes from the existing porcelain-v2 status call's stable
+  branch headers. Base discovery considers local `dev`, `main`, then `master`,
+  and a differing branch uses the required local-only `rev-list --left-right
+  --count base...HEAD`. No upstream, fetch, or network state participates.
+- The work is attached to the existing tree/status cadence rather than a new
+  endpoint or client poll. `.git` metadata already passes the watcher except
+  objects, so ordinary repositories update after the ~200 ms SSE coalescing
+  window plus local Git/tree work. Linked-worktree administrative state lives
+  outside the served root; there, navigation/reconnect or the next worktree
+  event/status refresh is the honest fallback, so metadata-only changes can
+  remain until that refresh.
+- Spawn accounting stayed flat for the common selected-base case: replacing
+  `rev-parse --verify HEAD` with status branch headers makes room for local base
+  discovery (four Git processes per status poll, as before). A differing branch
+  adds only `rev-list` for five total; detached HEAD needs three. The realistic
+  cached/uncached navigation measurements remain 54/134 total Git spawns.
+- Placement groups the subdued monospace branch badge with project identity,
+  before the header spacer, instead of crowding changed-only. Chromium measured
+  a 225.5 px separation from controls at 1,280 px; at 760 px the root label
+  hides, the long branch truncates, controls retain an 85.7 px gap, and body
+  width remains exactly the 760 px viewport. The layout detector returned no
+  findings.
+- The branch-state Chromium journey runs in its own Bun process, matching the
+  existing project-switcher isolation. Combining it with the core Playwright
+  process made the branch test pass but subsequently stalled the shared
+  fixture's navigations; isolation preserved the established Bun/Chromium pipe
+  boundary and the complete command then passed.
+- Final verification: `bun run check` checked 39 files and both TypeScript
+  projects; `bun run test` passed 147 tests with 433 assertions; `bun run
+  test:e2e` passed 36 Chromium tests with 385 assertions across the isolated
+  1-test project-switcher, 1-test branch-state, and 34-test main invocations.
+
+### 2026-08-06 addendum — narrow-header review fix
+
+- Independent review found the long branch badge collapsed to chrome-only width
+  at 400 px while worsening header overflow. The focused regression was red at
+  that exact seam: a 400 px viewport produced a 407 px document in this run
+  (the reviewer measured 433 px with its route/control state).
+- The badge now has a 112 px CSS floor—enough for a recognizable monospace
+  branch prefix after its 16 px horizontal chrome—and truncates with the full
+  label bound to both `title` and `aria-label`. At 440 px and below it yields
+  entirely; the header simultaneously tightens gaps/padding, hides the brand,
+  and lets the project selector shrink rather than displacing functional
+  controls.
+- The 645 px-content label measured 360, 228, and 122.3 px at 1280, 760, and
+  500 px; every visible state ellipsized with exact hover/accessibility text.
+  At 400 and 320 px the badge measured zero and hid cleanly. Document widths
+  matched all five viewports exactly, with the theme control remaining inside
+  the edge.
+- Added direct server oracles for a behind-only branch and a Unicode branch.
+  The E2E architecture inventory now records the actual five-file,
+  three-process layout and the Bun/Playwright pipe-transport reason for the two
+  isolated browser tests.
+- The one permitted UI detector pass reported only the established 3 px
+  change-mark and blockquote side accents, unrelated to this responsive header
+  change. Final fix-round gates: `bun run check` checked 39 files and both
+  TypeScript projects; `bun run test` passed 148 tests with 435 assertions; and
+  `bun run test:e2e` passed 36 Chromium tests with 411 assertions across the
+  isolated 1-test project-switcher, isolated 1-test branch-state, and 34-test
+  main invocations.
+
 ## 2026-08-06 — Hunk popups flip above short bottom space (#9)
 
 - A focused Chromium regression placed a Markdown rail mark 24 px from the

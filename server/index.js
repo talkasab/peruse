@@ -51,6 +51,16 @@ import {
  * @property {string} base
  * @property {Map<string, string>} status
  * @property {Set<string>} ignored
+ * @property {BranchState | null} branchState
+ */
+
+/**
+ * @typedef {object} BranchState
+ * @property {string} head
+ * @property {string | null} base
+ * @property {number} ahead
+ * @property {number} behind
+ * @property {boolean} detached
  */
 
 /**
@@ -136,12 +146,11 @@ async function git(root, ...args) {
   return { code, out };
 }
 
-/** @param {string} root @returns {Promise<{isRepo: boolean, prefix: string, base: string}>} */
+/** @param {string} root @returns {Promise<{isRepo: boolean, prefix: string}>} */
 async function gitInfo(root) {
   const { code, out } = await git(root, "rev-parse", "--show-prefix");
-  if (code !== 0) return { isRepo: false, prefix: "", base: EMPTY_TREE };
-  const head = await git(root, "rev-parse", "--verify", "-q", "HEAD");
-  return { isRepo: true, prefix: out.trim(), base: head.code === 0 ? "HEAD" : EMPTY_TREE };
+  if (code !== 0) return { isRepo: false, prefix: "" };
+  return { isRepo: true, prefix: out.trim() };
 }
 
 /**
@@ -153,13 +162,31 @@ export async function gitStatus(root) {
   const info = await gitInfo(root);
   const status = new Map();
   const ignored = new Set();
-  if (!info.isRepo) return { ...info, status, ignored };
+  if (!info.isRepo) return { ...info, base: EMPTY_TREE, status, ignored, branchState: null };
 
-  const st = await git(root, "status", "--porcelain=v2", "-z", "--untracked-files=all");
+  const st = await git(
+    root,
+    "status",
+    "--porcelain=v2",
+    "--branch",
+    "--no-ahead-behind",
+    "-z",
+    "--untracked-files=all",
+  );
+  let branchHead = "";
+  let branchOid = "";
   const parts = st.out.split("\0");
   for (let i = 0; i < parts.length; i++) {
     const entry = parts[i];
     if (!entry) continue;
+    if (entry.startsWith("# branch.oid ")) {
+      branchOid = entry.slice("# branch.oid ".length);
+      continue;
+    }
+    if (entry.startsWith("# branch.head ")) {
+      branchHead = entry.slice("# branch.head ".length);
+      continue;
+    }
     const type = entry[0];
     let letter, repoPath;
     if (type === "?") {
@@ -179,9 +206,48 @@ export async function gitStatus(root) {
   }
 
   // Collapsed listing (dirs get a trailing /) so the tree never walks node_modules etc.
-  const ig = await git(root, "ls-files", "-z", "-o", "-i", "--exclude-standard", "--directory");
+  // Base discovery shares the status cadence; it is not a separate client request.
+  const ignoredPaths = git(root, "ls-files", "-z", "-o", "-i", "--exclude-standard", "--directory");
+  const localBaseRefs =
+    branchHead && branchHead !== "(detached)"
+      ? git(
+          root,
+          "for-each-ref",
+          "--format=%(refname:short)",
+          "refs/heads/dev",
+          "refs/heads/main",
+          "refs/heads/master",
+        )
+      : Promise.resolve({ code: 0, out: "" });
+  const [ig, refs] = await Promise.all([ignoredPaths, localBaseRefs]);
   for (const p of ig.out.split("\0")) if (p) ignored.add(p);
-  return { ...info, status, ignored };
+  const base = branchOid && branchOid !== "(initial)" ? "HEAD" : EMPTY_TREE;
+  /** @type {BranchState | null} */
+  let branchState = null;
+  if (branchHead === "(detached)" && base === "HEAD") {
+    branchState = {
+      head: branchOid.slice(0, 7),
+      base: null,
+      ahead: 0,
+      behind: 0,
+      detached: true,
+    };
+  } else if (branchHead) {
+    const localBases = new Set(refs.out.split("\n").filter(Boolean));
+    const baseBranch = ["dev", "main", "master"].find((name) => localBases.has(name)) ?? null;
+    let ahead = 0;
+    let behind = 0;
+    if (base === "HEAD" && baseBranch && branchHead !== baseBranch) {
+      const counts = await git(root, "rev-list", "--left-right", "--count", `${baseBranch}...HEAD`);
+      if (counts.code === 0) {
+        const [left, right] = counts.out.trim().split(/\s+/).map(Number);
+        behind = Number.isFinite(left) ? left : 0;
+        ahead = Number.isFinite(right) ? right : 0;
+      }
+    }
+    branchState = { head: branchHead, base: baseBranch, ahead, behind, detached: false };
+  }
+  return { ...info, base, status, ignored, branchState };
 }
 
 const MAX_DIR_ENTRIES = 500;
@@ -1010,7 +1076,12 @@ export async function startServer({
               console.error(
                 `peruse: slow /api/tree — git ${tGit - t0} ms, walk ${Date.now() - tGit} ms`,
               );
-            return json({ root: projectRoot, isRepo: gs.isRepo, tree });
+            return json({
+              root: projectRoot,
+              isRepo: gs.isRepo,
+              branchState: gs.branchState,
+              tree,
+            });
           }
 
           if (tail === "/api/file") {

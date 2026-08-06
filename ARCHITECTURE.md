@@ -70,7 +70,7 @@ nor directory), but direct paths through them serve normally.
 | `GET /` + assets | landing/client bundle from `dist/` (auto-rebuilt at startup if any file recursively below `web/` is newer — checkout runs only) |
 | `GET /api/projects` | server `os.hostname()`, plus registered projects and live worktrees with missing state, last-opened time, and brief branch/change summary |
 | `GET /p/<name>/` | project viewer client; opening it updates the registered parent's `lastOpened`; an unavailable route returns a minimal hostname-titled HTML 404 |
-| `GET /p/<name>/api/tree` | nested JSON tree; per-file git status letter; gitignored flags; per-dir `dirty` flag; ignored dirs listed but not walked; ≤500 entries per dir |
+| `GET /p/<name>/api/tree` | nested JSON tree plus local branch state; per-file git status letter; gitignored flags; per-dir `dirty` flag; ignored dirs listed but not walked; ≤500 entries per dir |
 | `GET /p/<name>/api/file?path=` | text content, size, binary flag, status, hunks |
 | `GET /p/<name>/raw/<path>` | raw bytes, correct MIME (images, markdown assets) |
 | `GET /p/<name>/api/events` | project-scoped SSE change stream |
@@ -127,8 +127,9 @@ total Git spawns; the default cache costs 20 enumeration / 54 total spawns.
 
 ### Git
 
-Plain `git` subprocesses, cwd = served root: `status --porcelain=v2 -z
--uall` (statuses; repo-prefix aware), `ls-files -o -i --exclude-standard
+Plain `git` subprocesses, cwd = served root: `status --porcelain=v2 --branch
+--no-ahead-behind -z -uall` (statuses, current branch/OID; repo-prefix aware),
+`ls-files -o -i --exclude-standard
 --directory` (ignored set, dirs collapsed). Diff base is worktree-vs-`HEAD`
 (empty-tree hash when HEAD is unborn); untracked files diff against
 `/dev/null` via `--no-index`. Non-git directories degrade gracefully
@@ -137,6 +138,19 @@ Plain `git` subprocesses, cwd = served root: `status --porcelain=v2 -z
 `.git/index`, which both violates peruse's read-only contract and echoes
 back through the watcher as a git-change event, re-rendering clients whose
 request triggered the status call in the first place.
+
+Branch state is computed as part of that same status poll and returned by
+`/api/tree`; there is no branch-only request cadence. Porcelain-v2 branch
+headers provide the current branch and detached commit OID. Local heads select
+the comparison base in strict `dev` → `main` → `master` order. A differing
+branch runs `rev-list --left-right --count <base>...HEAD`; the left count is
+behind and the right count is ahead. The selected base itself, a branch with no
+recognized base, and comparisons with both counts at zero display only the branch name;
+detached HEAD displays `@ ` plus the seven-character OID. No fetch or remote
+lookup occurs. Reusing the status header instead of a separate HEAD verification
+keeps a selected-base poll at four Git processes, unchanged from before; a
+differing branch adds only the required `rev-list` (five total), while detached
+HEAD skips base discovery (three total).
 
 ### Hunks
 
@@ -159,6 +173,15 @@ landing-page listing alone starts none. Events are coalesced into ~200 ms batche
 `{"changed": [paths], "git": bool}` (`.git/*` changes set `git`, are never
 forwarded as file events). Clients re-fetch the tree on any event and
 re-fetch the open file when it changed (preserving scroll + open popup).
+The watcher admits `.git/HEAD`, refs, index, and other administrative metadata;
+only `.git/objects` is excluded. Ordinary-repository branch switches and commits
+therefore refresh branch state after the existing ~200 ms event-coalescing
+window plus the bounded local Git/tree request. A linked worktree's `.git` is a
+pointer file whose real administrative directory is outside the served root;
+that external directory is not watched. Its branch state still refreshes on
+project navigation/reconnect and whenever checkout or another worktree event
+causes the existing status poll, but a metadata-only change can remain visible
+until that next refresh.
 
 Robustness (each learned from a real failure):
 - `followSymlinks: false`; skip sockets/FIFOs/devices; watcher errors are
@@ -239,6 +262,17 @@ worktrees. At `/p/<name>/`, state is tree + flattened visible rows
 (depth-annotated), selection via `location.hash` (`#/path`), a grouped project /
 worktree dropdown in the header, and theme + word-wrap preference in
 `localStorage`.
+
+- **Header branch state**: a compact monospace badge sits with project identity,
+  after the served-root label and before the flexible spacer, leaving the
+  changed-only and display controls in their own cluster. It shows the routed
+  project's branch plus non-zero ahead/behind counts, or a short detached OID;
+  non-Git projects show nothing. Long labels truncate with their complete value
+  available as both hover text and accessible name. The lower-value root label
+  drops below 850 px; the badge retains a 112 px readable floor while shown,
+  then yields entirely at 440 px and below. At that floor the header also
+  tightens spacing and lets the project selector shrink, keeping the remaining
+  controls inside the viewport down to 320 px.
 
 The document title is `peruse - <server hostname>` on the landing page and
 adds ` - <route name>` for a selected project or worktree. A worktree therefore
@@ -458,26 +492,31 @@ they guard.
   the composed watcher/cache lifecycle — route invalidation settling a
   scan-broken runtime's pending readiness, runtime-level startup coalescing,
   and SSE stream EOF when a recovered runtime is invalidated).
-- `bun run test:e2e` → **E2E** (`test/e2e/`): core Chromium journeys —
-  smoke, code review (exact marks, popup scope), popup orientation (measured
-  above/below gaps for code and Markdown, neither-fits fallback, navigation,
-  split-height changes, and resize), markdown review (rail single-x
-  measurement, innermost marks, arrows, links, pinned headers, no body scroll),
-  live updates, theming (Latte/Mocha token + popup color flip), mdsvex `.svx`
-  (per-region computed colours in both themes, line-for-line source fidelity,
-  gutter marks and popup, oversized-file fallback) — plus two
-  self-contained regressions, each with its own fixture,
-  server, and fresh page: Markdown sanitization (inert hostile HTML alongside
-  preserved README/task-list/Shiki rendering in the live DOM) and navigation
-  (a silent refresh must not undo an in-flight navigation).
-  Chromium binary via `PERUSE_CHROMIUM` or playwright's registry.
+- `bun run test:e2e` → **E2E** (`test/e2e/`): five files in three ordered Bun
+  processes. `project-switcher.test.js` runs alone first, then
+  `branch-state.test.js` runs alone; each owns a fixture, server, and Chromium
+  instance. `core.test.js`, `navigation.test.js`, and `sanitize.test.js` share
+  the third process. Core carries eight Chromium journeys — smoke, code review
+  (exact marks, popup scope, Copy raw), popup orientation (measured above/below
+  gaps for code and Markdown, neither-fits fallback, navigation, split-height
+  changes, and resize), markdown review (rail single-x measurement, innermost
+  marks, arrows, links, pinned headers, no body scroll), live updates, theming
+  (Latte/Mocha token + popup color flip), mdsvex `.svx` (per-region computed
+  colours in both themes, line-for-line source fidelity, gutter marks and
+  popup, oversized-file fallback), and word wrap — while navigation and
+  sanitization remain self-contained regressions with their own fixtures,
+  servers, and fresh pages. The first two process boundaries are load-bearing:
+  cycling their additional Playwright browsers in the shared Bun process can
+  stall later pipe-transport navigations. Chromium comes from
+  `PERUSE_CHROMIUM` or Playwright's registry.
 
 The core journeys share one page. That pattern surfaced issue #26, which looked
 like harness flakiness but was an application race: an SSE silent refresh
 landing mid-navigation reverted `location.hash`, undoing a link click in about
 a quarter of runs. The fix is in `selectFile` (see Navigation vs. live refresh
 above); `navigation.test.js` drives the race deterministically. The sanitization
-and navigation regressions each use their own fixture, server, and page.
+and navigation regressions each use their own fixture, server, and page inside
+the third process.
 
 ## Development tooling
 

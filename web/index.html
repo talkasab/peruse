@@ -29,6 +29,8 @@
       </template>
     </select>
     <span class="root" x-show="projectName" x-text="rootLabel" :title="root"></span>
+    <span class="branch-state" x-show="projectName && branchState" x-text="branchLabel"
+          :title="branchLabel" :aria-label="branchLabel"></span>
     <span class="spacer"></span>
     <label class="toggle" x-show="projectName && isRepo">
       <input type="checkbox" x-model="changedOnly"> changed only

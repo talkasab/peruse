@@ -21,6 +21,9 @@ date and becomes the GitHub release notes (see
   project removal (#33)
 - Open text files now have a **Copy raw** action that copies their exact source,
   with clipboard fallback and visible success or permission feedback (#19)
+- The viewer header now shows the current local Git branch and its ahead/behind
+  state relative to `dev`, `main`, or `master`, including live branch and commit
+  updates and detached-HEAD identification (#15)
 
 ## [1.0.1] - 2026-08-06
 

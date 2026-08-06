@@ -136,6 +136,7 @@ header {
   text-decoration: none;
 }
 .project-switcher {
+  min-width: 0;
   max-width: 220px;
   color: var(--text);
   background: var(--surface0);
@@ -147,12 +148,29 @@ header {
 }
 .root {
   min-width: 0;
+  max-width: min(260px, 22vw);
   overflow: hidden;
   color: var(--subtext0);
   font-size: 13px;
   font-family: ui-monospace, monospace;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.branch-state {
+  flex: 0 1 min(360px, 32vw);
+  min-width: 112px;
+  max-width: min(360px, 32vw);
+  overflow: hidden;
+  padding: 2px 7px;
+  color: var(--subtext1);
+  font:
+    12px ui-monospace,
+    monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: var(--surface0);
+  border: 1px solid var(--surface1);
+  border-radius: 5px;
 }
 .toggle {
   display: flex;
@@ -167,6 +185,34 @@ header {
 }
 .theme-btn {
   min-width: 30px;
+}
+@media (max-width: 850px) {
+  header .root {
+    display: none;
+  }
+  .branch-state {
+    max-width: 30vw;
+  }
+}
+@media (max-width: 600px) {
+  header {
+    gap: 8px;
+    padding-inline: 10px;
+  }
+}
+@media (max-width: 440px) {
+  header {
+    gap: 4px;
+    padding-inline: 6px;
+  }
+  header .brand,
+  .branch-state {
+    display: none;
+  }
+  .project-switcher {
+    max-width: 64px;
+    padding-inline: 4px;
+  }
 }
 
 /* layout */

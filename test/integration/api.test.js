@@ -24,6 +24,7 @@ describe("/api/tree", () => {
     const { status, body } = await srv.json("/api/tree");
     expect(status).toBe(200);
     expect(body.isRepo).toBe(true);
+    expect(body.branchState?.head).toMatch(/^(main|master)$/);
     expect(findNode(body.tree, "src/util.py").status).toBe("M");
     expect(findNode(body.tree, "docs/new.md").status).toBe("U");
     expect(findNode(body.tree, "README.md").status).toBeNull();
@@ -150,6 +151,7 @@ describe("non-git directory degrades gracefully", () => {
   test("serves tree and files with no git decoration", async () => {
     const { body } = await plain.json("/api/tree");
     expect(body.isRepo).toBe(false);
+    expect(body.branchState).toBeNull();
     expect(findNode(body.tree, "note.md").status).toBeNull();
     const f = (await plain.json("/api/file?path=note.md")).body;
     expect(f.hunks).toEqual([]);

@@ -92,6 +92,7 @@ import { createHTMLSanitizer } from "./sanitize.js";
 /** @typedef {"unified" | "split"} DiffMode */
 /** @typedef {{start: number, mode: DiffMode}} PanelState */
 /** @typedef {{changed: string[], git: boolean}} ChangeEvent */
+/** @typedef {{head: string, base: string | null, ahead: number, behind: number, detached: boolean}} BranchState */
 /**
  * @typedef {object} ProjectView
  * @property {string} path
@@ -236,6 +237,7 @@ function buildPanel(file, i, mode) {
 Alpine.data("peruse", () => ({
   tree: /** @type {TreeNode[]} */ ([]),
   isRepo: false,
+  branchState: /** @type {BranchState | null} */ (null),
   root: "",
   open: /** @type {Set<string>} */ (new Set()),
   changedOnly: false,
@@ -295,6 +297,15 @@ Alpine.data("peruse", () => ({
   // ---- tree ----
   get rootLabel() {
     return this.root.split("/").filter(Boolean).slice(-2).join("/");
+  },
+  get branchLabel() {
+    const state = this.branchState;
+    if (!state) return "";
+    if (state.detached) return `@ ${state.head}`;
+    const sides = [];
+    if (state.ahead) sides.push(`${state.ahead} ahead`);
+    if (state.behind) sides.push(`${state.behind} behind`);
+    return `${state.head}${sides.length ? ` · ${sides.join(", ")}` : ""}`;
   },
   get registeredProjects() {
     return this.projects.filter((project) => project.kind === "project");
@@ -364,12 +375,14 @@ Alpine.data("peruse", () => ({
     return n.dir ? n.children.some((c) => this.hasChange(c)) : !!n.status;
   },
   async refreshTree() {
-    const d = /** @type {{tree: TreeNode[], isRepo: boolean, root: string}} */ (
-      await (await fetch(`${projectBase}/api/tree`)).json()
-    );
+    const d =
+      /** @type {{tree: TreeNode[], isRepo: boolean, root: string, branchState: BranchState | null}} */ (
+        await (await fetch(`${projectBase}/api/tree`)).json()
+      );
     this.tree = d.tree;
     this.isRepo = d.isRepo;
     this.root = d.root;
+    this.branchState = d.branchState;
   },
   /** @param {TreeNode} row */
   rowClick(row) {
