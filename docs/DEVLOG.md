@@ -4,6 +4,20 @@ Narrative record of work sessions — what changed, what we learned, and why.
 Newest first. (The [CHANGELOG](../CHANGELOG.md) is the user-facing summary;
 this is the engineering story.)
 
+## 2026-08-06 (integration) — Second wave merged: #33, #9, #19, #15
+
+- Merged smallest-first (#33 → #9 → #19 → #15), each branch rebased onto the
+  growing main. Doc unions were mechanical; the real composition was the
+  shared project-switcher e2e test (#33's title flow + #15's branch-state
+  flow in one journey) and ARCHITECTURE's endpoint/header/testing sections,
+  rewritten against a fresh census of the suites (eight core journeys, five
+  e2e files, three Bun processes).
+- Same impl/review discipline as the first batch, with the two Codex tabs
+  swapping roles so nobody reviewed their own work: 10 findings found and
+  fixed across the four branches, two rounds max per branch. #33's review
+  surfaced that the rapid-switcher race predates the wave — 1.0.x ships it.
+- Merged main: check clean, 148 unit/integration, 45 browser tests.
+
 ## 2026-08-06 — Local branch state in the viewer header (#15)
 
 - The primary Chromium regression created `feature/branch-state` one commit
