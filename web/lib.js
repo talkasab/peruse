@@ -98,11 +98,12 @@ export function hunkRange(h) {
 
 /**
  * Split leading YAML frontmatter off markdown content.
- * Returns null when there is none; otherwise { rows, body } where rows are
+ * Returns null when there is none; otherwise { rows, body, lines } where rows are
  * {key, value} or {raw} entries and body has the frontmatter lines replaced
- * by blanks so markdown-it's source line maps stay aligned with the file.
+ * by blanks so markdown-it's source line maps stay aligned with the file, and
+ * lines is the inclusive source extent of the frontmatter card.
  * @param {string} content
- * @returns {{rows: Array<{key: string, value: string} | {raw: string}>, body: string} | null}
+ * @returns {{rows: Array<{key: string, value: string} | {raw: string}>, body: string, lines: number} | null}
  */
 export function splitFrontmatter(content) {
   const fm = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(content);
@@ -112,5 +113,6 @@ export function splitFrontmatter(content) {
     return kv ? { key: kv[1], value: kv[2] } : { raw: line };
   });
   const body = "\n".repeat(fm[0].split("\n").length - 1) + content.slice(fm[0].length);
-  return { rows, body };
+  const lines = fm[0].split("\n").length - Number(fm[0].endsWith("\n"));
+  return { rows, body, lines };
 }

@@ -21,6 +21,7 @@ describe("splitFrontmatter", () => {
     expect(fm.body.split("\n").length).toBe(src.split("\n").length);
     expect(fm.body).toContain("# Title");
     expect(fm.body).not.toContain("Created:");
+    expect(fm.lines).toBe(4);
   });
 
   test("non-key lines come through raw; CRLF accepted", () => {

@@ -758,8 +758,9 @@ table.fm-card {
 /* Change rail: marks are absolutely-positioned overlay bars in a fixed
    gutter column at the article's left edge — one x for every mark, no
    matter how deeply the changed block is nested. Blocks themselves are
-   never restyled or shifted; JS measures each marked block and lays a
-   bar beside it (re-laid on viewer resize). */
+   never restyled or shifted; JS measures each marked block and lays one
+   bar per change beside it, using a compact ordered stack when a block owns
+   several changes (re-laid on viewer resize). */
 .markdown-body .md-changed {
   cursor: pointer;
 }
@@ -777,6 +778,14 @@ table.fm-card {
 .rail-mark.rm-add {
   background: var(--green);
   cursor: default;
+}
+.rail-mark.rm-approx {
+  background: transparent;
+  outline: 1px dashed var(--blue);
+  outline-offset: -1px;
+}
+.rail-mark.rm-add.rm-approx {
+  outline-color: var(--green);
 }
 
 /* hunk diff popup: anchored popover at the clicked mark, scrolls with content */

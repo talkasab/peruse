@@ -6,6 +6,7 @@ import { appendFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import {
+  DENSE_MARK_EDITED,
   launchBrowser,
   makeFixtureRepo,
   POST_SVX_EDITED,
@@ -138,6 +139,339 @@ describe("code review journey", () => {
 
 describe("markdown review journey", () => {
   test(
+    "every change sharing a Markdown block has its own reachable rail mark (#24)",
+    async () => {
+      await openFile("docs/multi-mark.md");
+      await page.waitForSelector(".rail-mark");
+
+      const headerCount = Number.parseInt(await page.locator(".chip-group span").innerText(), 10);
+      expect(headerCount).toBe(8);
+      expect(await page.locator(".rail-mark").count()).toBe(headerCount);
+
+      const sharedBlocks = await page.evaluate(() => {
+        const hunks = (selector) =>
+          document.querySelector(selector)?.getAttribute("data-hunks")?.split(",") ?? [];
+        return {
+          frontmatter: hunks(".fm-card"),
+          heading: hunks(".markdown-body h1"),
+          paragraph: hunks(".markdown-body p"),
+          listItem: hunks(".markdown-body li"),
+          fence: hunks(".markdown-body pre"),
+        };
+      });
+      expect(sharedBlocks.frontmatter.length).toBe(1);
+      // The changed HTML comment emits no rendered element. Its hunk falls
+      // back to the nearest source-mapped block instead of dead-ending.
+      expect(sharedBlocks.heading.length).toBe(1);
+      expect(await page.locator('.rail-mark[data-hunk="1"].rm-approx').count()).toBe(1);
+      expect(sharedBlocks.paragraph.length).toBe(2);
+      expect(sharedBlocks.listItem.length).toBe(2);
+      expect(sharedBlocks.fence.length).toBe(2);
+
+      const marks = page.locator(".rail-mark");
+      const visitedByMark = [];
+      const expectedChanges = [
+        "title: Multi-mark edited",
+        "Hidden source after.",
+        "Paragraph first line after.",
+        "Paragraph last line after.",
+        "List first line after.",
+        "List last line after.",
+        "Fence first line after.",
+        "Fence last line after.",
+      ];
+      for (let i = 0; i < headerCount; i++) {
+        const mark = marks.nth(i);
+        const expected = await mark.getAttribute("data-hunk");
+        const markBox = await mark.boundingBox();
+        await page.mouse.click(markBox.x + markBox.width / 2, markBox.y + markBox.height / 2);
+        const popup = page.locator(".hunk-popup");
+        const actual = await popup.getAttribute("data-hunk");
+        expect(actual).toBe(expected);
+        expect(await page.locator(".hp-body").innerText()).toContain(
+          expectedChanges[Number(actual)],
+        );
+        const popupBox = await popup.boundingBox();
+        expect(Math.abs(popupBox.y - (markBox.y + markBox.height + 6))).toBeLessThanOrEqual(1);
+        visitedByMark.push(actual);
+      }
+      expect(new Set(visitedByMark).size).toBe(headerCount);
+
+      const geometry = await page.$$eval(".rail-mark", (els) => ({
+        xs: els.map((el) => Math.round(el.getBoundingClientRect().left)),
+        ys: els.map((el) => Math.round(el.getBoundingClientRect().top)),
+      }));
+      expect(new Set(geometry.xs).size).toBe(1);
+      expect(new Set(geometry.ys).size).toBeGreaterThan(4);
+      for (const indices of [sharedBlocks.paragraph, sharedBlocks.listItem, sharedBlocks.fence]) {
+        const tops = indices.map((i) => geometry.ys[Number(i)]);
+        expect(new Set(tops).size).toBe(2);
+      }
+
+      await page.keyboard.press("Escape");
+      const visitedByArrows = [];
+      for (let i = 0; i < headerCount; i++) {
+        await page.click("[title='Next change']");
+        visitedByArrows.push(await page.locator(".hunk-popup").getAttribute("data-hunk"));
+      }
+      expect(new Set(visitedByArrows).size).toBe(headerCount);
+      await page.click("[title='Next change']");
+      expect(await page.locator(".hunk-popup").getAttribute("data-hunk")).toBe(visitedByArrows[0]);
+    },
+    T,
+  );
+
+  test(
+    "dense shared-block marks never overlap and every center opens its own change (#24)",
+    async () => {
+      await openFile("docs/dense-mark.md");
+      await page.waitForFunction(() => document.querySelectorAll(".rail-mark").length === 9);
+      const marks = page.locator(".rail-mark");
+      const rects = await marks.evaluateAll((elements) =>
+        elements.map((element) => {
+          const box = element.getBoundingClientRect();
+          return { hunk: Number(element.dataset.hunk), top: box.top, bottom: box.bottom };
+        }),
+      );
+      for (let i = 1; i < rects.length; i++)
+        expect(rects[i - 1].bottom).toBeLessThanOrEqual(rects[i].top);
+
+      for (let i = 0; i < 9; i++) {
+        const mark = marks.nth(i);
+        const box = await mark.boundingBox();
+        const hit = await page.evaluate(
+          ({ x, y }) => document.elementFromPoint(x, y)?.closest(".rail-mark")?.dataset.hunk,
+          { x: box.x + box.width / 2, y: box.y + box.height / 2 },
+        );
+        expect(Number(hit)).toBe(i);
+        await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+        expect(Number(await page.locator(".hunk-popup").getAttribute("data-hunk"))).toBe(i);
+        expect(await page.locator(".hp-body").innerText()).toContain(`A${i * 2 + 1}`);
+      }
+    },
+    T,
+  );
+
+  test(
+    "unevenly wrapped shared blocks use an honest compact mark stack (#24)",
+    async () => {
+      await page.setViewportSize({ width: 600, height: 800 });
+      try {
+        await openFile("docs/uneven-mark.md");
+        await page.waitForFunction(() => document.querySelectorAll(".rail-mark").length === 2);
+        await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => resolve())));
+        const measured = await page.evaluate(() => {
+          const block = document.querySelector(".markdown-body p").getBoundingClientRect();
+          const marks = [...document.querySelectorAll(".rail-mark")].map((element) => {
+            const box = element.getBoundingClientRect();
+            return {
+              hunk: Number(element.dataset.hunk),
+              top: box.top,
+              bottom: box.bottom,
+              height: box.height,
+            };
+          });
+          return { block: { top: block.top, height: block.height }, marks };
+        });
+        expect(measured.block.height).toBeGreaterThan(500);
+        expect(Math.abs(measured.marks[0].top - measured.block.top)).toBeLessThanOrEqual(1);
+        expect(Math.abs(measured.marks[0].height - 6)).toBeLessThanOrEqual(0.5);
+        expect(Math.abs(measured.marks[1].height - 6)).toBeLessThanOrEqual(0.5);
+        expect(Math.abs(measured.marks[1].top - measured.marks[0].top - 8)).toBeLessThanOrEqual(
+          0.5,
+        );
+        expect(measured.marks[0].bottom).toBeLessThanOrEqual(measured.marks[1].top);
+
+        for (const [i, text] of [
+          [0, "Uneven first after."],
+          [1, "Uneven last after."],
+        ]) {
+          const box = await page.locator(`.rail-mark[data-hunk="${i}"]`).boundingBox();
+          await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+          expect(Number(await page.locator(".hunk-popup").getAttribute("data-hunk"))).toBe(i);
+          expect(await page.locator(".hp-body").innerText()).toContain(text);
+        }
+      } finally {
+        await page.setViewportSize({ width: 1280, height: 800 });
+      }
+    },
+    T,
+  );
+
+  test(
+    "competing adjacent stacks relocate without crossing or stealing clicks (#24)",
+    async () => {
+      await openFile("docs/competing-mark.md");
+      await page.waitForFunction(() => document.querySelectorAll(".rail-mark").length === 8);
+      const measured = await page.evaluate(() => {
+        const blocks = [...document.querySelectorAll(".markdown-body li")].map((element) => {
+          const box = element.getBoundingClientRect();
+          return { top: box.top, bottom: box.bottom, hunks: element.dataset.hunks };
+        });
+        const marks = [...document.querySelectorAll(".rail-mark")].map((element) => {
+          const box = element.getBoundingClientRect();
+          return { hunk: Number(element.dataset.hunk), top: box.top, bottom: box.bottom };
+        });
+        return { blocks, marks };
+      });
+      expect(measured.blocks.map(({ hunks }) => hunks)).toEqual(["0,1,2,3", "4,5,6,7"]);
+      expect(measured.marks.map(({ hunk }) => hunk)).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
+      expect(measured.marks[4].top).toBeGreaterThan(measured.blocks[1].top + 1);
+      for (let i = 1; i < measured.marks.length; i++)
+        expect(measured.marks[i - 1].bottom).toBeLessThanOrEqual(measured.marks[i].top);
+
+      for (let i = 0; i < 8; i++) {
+        const box = await page.locator(`.rail-mark[data-hunk="${i}"]`).boundingBox();
+        await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+        expect(Number(await page.locator(".hunk-popup").getAttribute("data-hunk"))).toBe(i);
+        const side = i < 4 ? "left" : "right";
+        const line = (i % 4) * 2 + 1;
+        expect(await page.locator(".hp-body").innerText()).toContain(`${side}-${line} after`);
+      }
+    },
+    T,
+  );
+
+  test(
+    "global rail sweep keeps early overflow before a later tall single change (#24)",
+    async () => {
+      await openFile("docs/order-mark.md");
+      await page.waitForFunction(() => document.querySelectorAll(".rail-mark").length === 31);
+      const measured = await page.evaluate(() => {
+        const blocks = [...document.querySelectorAll(".markdown-body p")].map((element) => {
+          const box = element.getBoundingClientRect();
+          return { top: box.top, bottom: box.bottom };
+        });
+        const marks = [...document.querySelectorAll(".rail-mark")].map((element) => {
+          const box = element.getBoundingClientRect();
+          return { hunk: Number(element.dataset.hunk), top: box.top, bottom: box.bottom };
+        });
+        return { blocks, marks };
+      });
+      expect(measured.blocks[1].bottom - measured.blocks[1].top).toBeGreaterThan(500);
+      expect(measured.marks.map(({ hunk }) => hunk)).toEqual(
+        Array.from({ length: 31 }, (_, i) => i),
+      );
+      expect(Math.abs(measured.marks[0].top - measured.blocks[0].top)).toBeLessThanOrEqual(1);
+      for (let i = 1; i < measured.marks.length; i++)
+        expect(measured.marks[i - 1].bottom).toBeLessThanOrEqual(measured.marks[i].top);
+      const lastEarly = measured.marks[29];
+      const later = measured.marks[30];
+      const expectedLaterTop = Math.max(measured.blocks[1].top, lastEarly.bottom + 2);
+      expect(Math.abs(later.top - expectedLaterTop)).toBeLessThanOrEqual(1);
+
+      await page.keyboard.press("Escape");
+      const arrows = [];
+      for (let i = 0; i < 31; i++) {
+        await page.click("[title='Next change']");
+        arrows.push(Number(await page.locator(".hunk-popup").getAttribute("data-hunk")));
+      }
+      expect(arrows).toEqual(measured.marks.map(({ hunk }) => hunk));
+    },
+    T,
+  );
+
+  test(
+    "over-capacity arrow navigation reveals the selected mark and popup header (#24)",
+    async () => {
+      await openFile("docs/overflow-mark.md");
+      await page.waitForFunction(() => document.querySelectorAll(".rail-mark").length === 120);
+      const visible = () =>
+        page.evaluate(() => {
+          const pane = document.querySelector("#viewer-scroll").getBoundingClientRect();
+          const mark = document
+            .querySelector('.rail-mark[data-hunk="119"]')
+            .getBoundingClientRect();
+          const header = document.querySelector(".hunk-popup .hp-bar").getBoundingClientRect();
+          const intersects = (box) => box.bottom > pane.top && box.top < pane.bottom;
+          return {
+            mark: intersects(mark),
+            header: intersects(header),
+            scrollTop: document.querySelector("#viewer-scroll").scrollTop,
+          };
+        });
+
+      await page.locator('.rail-mark[data-hunk="118"]').click();
+      await page.click("[title='Next change']");
+      expect(await page.locator(".hunk-popup").getAttribute("data-hunk")).toBe("119");
+      expect(await visible()).toEqual(expect.objectContaining({ mark: true, header: true }));
+
+      await page.keyboard.press("Escape");
+      await page.click("[title='Previous change']");
+      expect(await page.locator(".hunk-popup").getAttribute("data-hunk")).toBe("119");
+      expect(await visible()).toEqual(expect.objectContaining({ mark: true, header: true }));
+    },
+    T,
+  );
+
+  test(
+    "a hunk crossing sibling blocks has one deterministic owner and anchor (#24)",
+    async () => {
+      await openFile("docs/cross-block.md");
+      await page.waitForSelector(".rail-mark");
+      expect(await page.locator(".chip-group span").innerText()).toBe("1 change");
+      expect(await page.locator(".rail-mark").count()).toBe(1);
+      const owners = await page.$$eval(".markdown-body li", (elements) =>
+        elements.map((element) => element.dataset.hunks ?? null),
+      );
+      expect(owners).toEqual(["0", null]);
+      const mark = page.locator('.rail-mark[data-hunk="0"]');
+      const markBox = await mark.boundingBox();
+      await page.mouse.click(markBox.x + markBox.width / 2, markBox.y + markBox.height / 2);
+      const popupBox = await page.locator(".hunk-popup").boundingBox();
+      expect(Math.abs(popupBox.y - markBox.y - markBox.height - 6)).toBeLessThanOrEqual(1);
+      expect(await page.locator(".hp-body").innerText()).toContain("first boundary after");
+      expect(await page.locator(".hp-body").innerText()).toContain("second boundary after");
+    },
+    T,
+  );
+
+  test(
+    "dense stacks remain ordered through wrap and live re-render (#24)",
+    async () => {
+      await openFile("docs/dense-mark.md");
+      await page.waitForFunction(() => document.querySelectorAll(".rail-mark").length === 9);
+      if (!(await page.locator("#viewer").getAttribute("data-wrap"))) await page.click(".wrap-btn");
+      await page.waitForFunction(() => document.querySelector("#viewer").hasAttribute("data-wrap"));
+      const verify = async (count) => {
+        const marks = await page.$$eval(".rail-mark", (elements) =>
+          elements.map((element) => {
+            const box = element.getBoundingClientRect();
+            return { hunk: Number(element.dataset.hunk), top: box.top, bottom: box.bottom };
+          }),
+        );
+        expect(marks.length).toBe(count);
+        expect(marks.map(({ hunk }) => hunk)).toEqual(Array.from({ length: count }, (_, i) => i));
+        for (let i = 1; i < marks.length; i++)
+          expect(marks[i - 1].bottom).toBeLessThanOrEqual(marks[i].top);
+      };
+      await verify(9);
+
+      writeFileSync(
+        join(root, "docs/dense-mark.md"),
+        DENSE_MARK_EDITED.replace("Tail stable before.", "Tail stable after."),
+      );
+      await page.waitForFunction(
+        () =>
+          document.querySelector(".chip-group span")?.textContent === "10 changes" &&
+          document.querySelectorAll(".rail-mark").length === 10,
+        null,
+        { timeout: 8000 },
+      );
+      await verify(10);
+      const last = page.locator('.rail-mark[data-hunk="9"]');
+      const box = await last.boundingBox();
+      await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+      expect(await page.locator(".hp-body").innerText()).toContain("Tail stable after.");
+      await page.click(".wrap-btn");
+      await page.waitForFunction(
+        () => !document.querySelector("#viewer").hasAttribute("data-wrap"),
+      );
+    },
+    T,
+  );
+
+  test(
     "frontmatter card, single-x rail, innermost marks, arrows, links",
     async () => {
       await openFile("docs/guide.md");
@@ -150,6 +484,20 @@ describe("markdown review journey", () => {
         els.map((e) => Math.round(e.getBoundingClientRect().left)),
       );
       expect(new Set(xs).size).toBe(1);
+      const singleGeometry = await page.$$eval(".markdown-body .md-changed", (blocks) =>
+        blocks.map((block) => {
+          const mark = document.querySelector(`.rail-mark[data-hunk="${block.dataset.hunks}"]`);
+          const blockBox = block.getBoundingClientRect();
+          const markBox = mark.getBoundingClientRect();
+          return {
+            topDelta: Math.abs(markBox.top - blockBox.top),
+            heightDelta: Math.abs(markBox.height - blockBox.height),
+          };
+        }),
+      );
+      expect(
+        singleGeometry.every(({ topDelta, heightDelta }) => topDelta <= 1 && heightDelta <= 1),
+      ).toBe(true);
       // incident d461de7: innermost marking — one bullet edited → one li marked
       const lis = await page.$$eval(".markdown-body ul li", (els) =>
         els.map((e) => e.classList.contains("md-changed")),

@@ -107,7 +107,9 @@ import { createHTMLSanitizer } from "./sanitize.js";
 
 const MAX_HL_SIZE = 1_000_000,
   MAX_HL_LINES = 10_000,
-  MAX_SVX_HL_LINES = 3500;
+  MAX_SVX_HL_LINES = 3500,
+  MULTI_MARK_HEIGHT = 6,
+  MULTI_MARK_GAP = 2;
 const IMG_EXTS = new Set(["png", "jpg", "jpeg", "gif", "webp", "ico", "avif", "bmp"]);
 const sanitizeHTML = createHTMLSanitizer(window);
 const routeMatch = location.pathname.match(/^\/p\/([^/]+)\/?$/);
@@ -456,7 +458,7 @@ Alpine.data("peruse", () => ({
             : `<tr><th>${esc(r.key)}</th><td>${esc(r.value)}</td></tr>`,
         )
         .join("");
-      fmCard = `<table class="fm-card">${rows}</table>`;
+      fmCard = `<table class="fm-card" data-lines="1-${fm.lines}">${rows}</table>`;
       body = fm.body;
     }
     v.innerHTML = sanitizeHTML(
@@ -498,29 +500,51 @@ Alpine.data("peruse", () => ({
     // Wholly-new files (U/A) get no per-block marks: everything is "added",
     // so a border on every block is pure noise — the header badge says it all.
     if (f.status === "U" || f.status === "A") return;
-    /** @type {Map<HTMLElement, number>} */
-    const cand = new Map();
-    for (const element of v.querySelectorAll("[data-lines]")) {
-      const b = /** @type {HTMLElement} */ (element);
-      const range = b.dataset.lines;
-      if (!range) continue;
-      const [bs, be] = range.split("-").map(Number);
-      const idx = f.hunks.findIndex((h) => {
-        const [hs, he] = hunkRange(h);
-        return hs <= be && he >= bs;
+    /** @type {Map<HTMLElement, number[]>} */
+    const assigned = new Map();
+    /** @param {HTMLElement} b @param {number} i */
+    const assign = (b, i) => assigned.set(b, [...(assigned.get(b) ?? []), i]);
+    const rendered = /** @type {HTMLElement[]} */ ([...v.querySelectorAll("[data-lines]")]);
+    // Some source ranges render no block at all. Keep those changes visible
+    // and navigable by assigning the nearest rendered source range (or the
+    // article itself when the document has no rendered blocks).
+    const approximate = new Set();
+    for (let i = 0; i < f.hunks.length; i++) {
+      const [line] = hunkRange(f.hunks[i]);
+      const containing = rendered.filter((b) => {
+        const [bs, be] = (b.dataset.lines ?? "1-1").split("-").map(Number);
+        return bs <= line && line <= be;
       });
-      if (idx >= 0) cand.set(b, idx);
-    }
-    for (const [b, idx] of cand) {
-      let hasDeeper = false;
-      for (const d of b.querySelectorAll("[data-lines]"))
-        if (cand.has(/** @type {HTMLElement} */ (d))) {
-          hasDeeper = true;
-          break;
+      // One hunk gets one owner: the innermost rendered block containing its
+      // first changed line. This resolves sibling-spanning hunks to the first
+      // block instead of duplicating their mark across every overlap.
+      const owner = containing.find((b) => !containing.some((d) => d !== b && b.contains(d)));
+      if (owner) {
+        assign(owner, i);
+        continue;
+      }
+      let nearest = article,
+        distance = Infinity;
+      for (const b of rendered) {
+        const [bs, be] = (b.dataset.lines ?? "1-1").split("-").map(Number);
+        const d = line < bs ? bs - line : line > be ? line - be : 0;
+        if (d < distance) {
+          nearest = b;
+          distance = d;
         }
-      if (hasDeeper) continue;
-      b.classList.add("md-changed", f.hunks[idx].kind === "added" ? "md-add" : "md-mod");
-      if (f.hunks[idx].kind !== "added") b.dataset.hunk = String(idx);
+      }
+      assign(nearest, i);
+      approximate.add(i);
+    }
+    for (const [b, indices] of assigned) {
+      indices.sort((a, z) => a - z);
+      b.dataset.hunks = indices.join(",");
+      const approximateIndices = indices.filter((i) => approximate.has(i));
+      if (approximateIndices.length) b.dataset.approxHunks = approximateIndices.join(",");
+      b.classList.add(
+        "md-changed",
+        indices.every((i) => f.hunks[i].kind === "added") ? "md-add" : "md-mod",
+      );
     }
     this.layoutRails();
   },
@@ -534,15 +558,43 @@ Alpine.data("peruse", () => ({
     const article = /** @type {HTMLElement | null} */ (v.querySelector(".markdown-body"));
     if (!article) return;
     const railX = article.offsetLeft + 10;
-    for (const element of v.querySelectorAll(".md-changed")) {
-      const b = /** @type {HTMLElement} */ (element);
+    const blocks = [...v.querySelectorAll(".md-changed")].map((element) => {
+      const block = /** @type {HTMLElement} */ (element);
+      return {
+        block,
+        indices: (block.dataset.hunks ?? "").split(",").filter(Boolean).map(Number),
+        approximate: new Set(
+          (block.dataset.approxHunks ?? "").split(",").filter(Boolean).map(Number),
+        ),
+      };
+    });
+    const entries = blocks
+      .flatMap(({ block, indices, approximate }) =>
+        indices.map((i, position) => ({
+          block,
+          i,
+          approximate: approximate.has(i),
+          naturalTop:
+            indices.length === 1
+              ? block.offsetTop
+              : block.offsetTop + position * (MULTI_MARK_HEIGHT + MULTI_MARK_GAP),
+          height: indices.length === 1 ? block.offsetHeight : MULTI_MARK_HEIGHT,
+        })),
+      )
+      .sort((a, z) => a.i - z.i);
+    let previousBottom = -Infinity;
+    for (const { i, approximate, naturalTop, height } of entries) {
+      // One source-ordered sweep: overflow can cascade later marks downward,
+      // but a later change can never appear above an earlier one.
+      const top = Math.max(naturalTop, previousBottom + MULTI_MARK_GAP);
       const m = document.createElement("span");
-      m.className = `rail-mark${b.classList.contains("md-add") ? " rm-add" : ""}`;
-      if (b.dataset.hunk !== undefined) m.dataset.hunk = b.dataset.hunk;
+      m.className = `rail-mark${this.file?.hunks[i].kind === "added" ? " rm-add" : ""}${approximate ? " rm-approx" : ""}`;
+      m.dataset.hunk = String(i);
       m.style.left = `${railX}px`;
-      m.style.top = `${b.offsetTop}px`;
-      m.style.height = `${b.offsetHeight}px`;
+      m.style.top = `${top}px`;
+      m.style.height = `${height}px`;
       v.appendChild(m);
+      previousBottom = top + height;
     }
   },
 
@@ -573,24 +625,83 @@ Alpine.data("peruse", () => ({
   // ---- hunk diff popup (anchored popover, one at a time) ----
   /** @param {number} i @returns {HTMLElement | null} */
   anchorFor(i) {
-    // topmost mark belonging to hunk i, markdown block or code line
-    return /** @type {HTMLElement | null} */ (
-      this.$refs.viewer.querySelector(`.md-changed[data-hunk="${i}"], .line[data-hunk="${i}"]`)
+    const line = /** @type {HTMLElement | null} */ (
+      this.$refs.viewer.querySelector(`.line[data-hunk="${i}"]`)
     );
+    if (line) return line;
+    const blocks = /** @type {HTMLElement[]} */ ([
+      ...this.$refs.viewer.querySelectorAll(".md-changed[data-hunks]"),
+    ]);
+    const exact = blocks.find((b) => (b.dataset.hunks ?? "").split(",").map(Number).includes(i));
+    if (exact) return exact;
+    // Defensive navigation fallback for any future renderer that emits a
+    // source range we did not assign during renderMarkdown().
+    if (!this.isMarkdown || !this.file) return null;
+    const [sourceLine] = hunkRange(this.file.hunks[i]);
+    let nearest = /** @type {HTMLElement | null} */ (
+        this.$refs.viewer.querySelector(".markdown-body")
+      ),
+      distance = Infinity;
+    for (const element of this.$refs.viewer.querySelectorAll("[data-lines]")) {
+      const b = /** @type {HTMLElement} */ (element);
+      const [bs, be] = (b.dataset.lines ?? "1-1").split("-").map(Number);
+      const d = sourceLine < bs ? bs - sourceLine : sourceLine > be ? sourceLine - be : 0;
+      if (d < distance) {
+        nearest = b;
+        distance = d;
+      }
+    }
+    return nearest;
   },
-  /** @param {number} i @param {DiffMode} [mode] @param {HTMLElement | null} [anchorEl] */
-  openPanel(i, mode = "unified", anchorEl = null) {
+  /** @param {HTMLElement} mark @param {HTMLElement} popup */
+  revealReview(mark, popup) {
+    const scroll = this.$refs.scroll;
+    const header = /** @type {HTMLElement | null} */ (popup.querySelector(".hp-bar"));
+    const padding = 8;
+    const top = Math.min(mark.offsetTop, popup.offsetTop);
+    const bottom = Math.max(
+      mark.offsetTop + mark.offsetHeight,
+      popup.offsetTop + (header?.offsetHeight ?? 0),
+    );
+    let target = scroll.scrollTop;
+    if (top < target + padding) target = Math.max(0, top - padding);
+    if (bottom > target + scroll.clientHeight - padding)
+      target = bottom - scroll.clientHeight + padding;
+    scroll.scrollTop = target;
+  },
+  /**
+   * @param {number} i
+   * @param {DiffMode} [mode]
+   * @param {HTMLElement | null} [anchorEl]
+   * @param {HTMLElement | null} [verticalEl]
+   * @param {boolean} [reveal]
+   * @returns {HTMLElement | null}
+   */
+  openPanel(i, mode = "unified", anchorEl = null, verticalEl = null, reveal = false) {
     this.closeAllPanels();
     const anchor = anchorEl ?? this.anchorFor(i);
-    if (!anchor || !this.file) return;
+    if (!anchor || !this.file) return null;
     const popup = buildPanel(this.file, i, mode);
     this.$refs.viewer.appendChild(popup);
     const isLine = anchor.classList.contains("line");
+    const railAnchor =
+      verticalEl ??
+      /** @type {HTMLElement | null} */ (
+        this.$refs.viewer.querySelector(`.rail-mark[data-hunk="${i}"]`)
+      );
+    const verticalAnchor = isLine ? anchor : (railAnchor ?? anchor);
     popup.style.left = `${anchor.offsetLeft + (isLine ? this.codeGutterPx(anchor) : 0)}px`;
-    popup.style.top = `${anchor.offsetTop + anchor.offsetHeight + 6}px`;
+    popup.style.top = `${verticalAnchor.offsetTop + verticalAnchor.offsetHeight + 6}px`;
+    if (reveal) this.revealReview(verticalAnchor, popup);
+    return popup;
   },
-  /** @param {number} i @param {HTMLElement | null} [anchorEl] */
-  togglePanel(i, anchorEl = null) {
+  /**
+   * @param {number} i
+   * @param {HTMLElement | null} [anchorEl]
+   * @param {HTMLElement | null} [verticalEl]
+   * @param {boolean} [reveal]
+   */
+  togglePanel(i, anchorEl = null, verticalEl = null, reveal = false) {
     const existing = /** @type {HTMLElement | null} */ (
       this.$refs.viewer.querySelector(".hunk-popup")
     );
@@ -598,7 +709,7 @@ Alpine.data("peruse", () => ({
       existing.remove();
       return;
     }
-    this.openPanel(i, "unified", anchorEl);
+    this.openPanel(i, "unified", anchorEl, verticalEl, reveal);
   },
   /** @param {HTMLElement} panel */
   flipPanel(panel) {
@@ -623,9 +734,12 @@ Alpine.data("peruse", () => ({
     const pos = cur ? r.findIndex(({ i }) => i === Number(cur.dataset.hunk)) : dir > 0 ? -1 : 0;
     const next = r[(pos + dir + r.length) % r.length].i;
     const anchor = this.anchorFor(next);
-    if (!anchor) return;
-    anchor.scrollIntoView({ block: "center" });
-    this.openPanel(next, "unified", anchor);
+    const vertical = /** @type {HTMLElement | null} */ (
+      this.$refs.viewer.querySelector(`.line[data-hunk="${next}"], .rail-mark[data-hunk="${next}"]`)
+    );
+    if (!anchor || !vertical) return;
+    vertical.scrollIntoView({ block: "center" });
+    this.openPanel(next, "unified", anchor, vertical, true);
   },
   /** @returns {PanelState[]} */
   panelState() {
@@ -673,16 +787,43 @@ Alpine.data("peruse", () => ({
     const a = /** @type {HTMLAnchorElement | null} */ (target.closest("a[href]"));
     if (a && this.interceptLink(e, a)) return;
     const rail = /** @type {HTMLElement | null} */ (target.closest(".rail-mark"));
-    if (rail?.dataset.hunk !== undefined) return this.togglePanel(+rail.dataset.hunk);
+    if (rail?.dataset.hunk !== undefined) {
+      const i = +rail.dataset.hunk;
+      if (this.file?.hunks[i]?.kind !== "added") return this.togglePanel(i, null, rail, true);
+      return;
+    }
     const blk = /** @type {HTMLElement | null} */ (target.closest(".md-changed"));
-    if (blk?.dataset.hunk !== undefined && !target.closest("a, input, button"))
-      return this.togglePanel(+blk.dataset.hunk, blk);
+    if (blk?.dataset.hunks !== undefined && !target.closest("a, input, button")) {
+      const reviewable = blk.dataset.hunks
+        .split(",")
+        .map(Number)
+        .filter((i) => this.file?.hunks[i]?.kind !== "added");
+      if (reviewable.length) {
+        const i = reviewable.reduce((best, candidate) => {
+          const mark = this.$refs.viewer.querySelector(`.rail-mark[data-hunk="${candidate}"]`);
+          const bestMark = this.$refs.viewer.querySelector(`.rail-mark[data-hunk="${best}"]`);
+          /** @param {Element | null} el */
+          const center = (el) => {
+            const box = el?.getBoundingClientRect();
+            return box ? box.top + box.height / 2 : e.clientY;
+          };
+          return Math.abs(center(mark) - e.clientY) < Math.abs(center(bestMark) - e.clientY)
+            ? candidate
+            : best;
+        });
+        const rail = /** @type {HTMLElement | null} */ (
+          this.$refs.viewer.querySelector(`.rail-mark[data-hunk="${i}"]`)
+        );
+        return this.togglePanel(i, blk, rail, true);
+      }
+      return;
+    }
     const line = /** @type {HTMLElement | null} */ (target.closest(".line"));
     if (
       line?.dataset.hunk !== undefined &&
       e.clientX - line.getBoundingClientRect().left <= this.codeGutterPx(line)
     )
-      return this.togglePanel(+line.dataset.hunk, line);
+      return this.togglePanel(+line.dataset.hunk, line, line, true);
     this.closeAllPanels(); // click anywhere else dismisses the popup
   },
   /** @param {MouseEvent} e @param {HTMLAnchorElement} a */

@@ -97,6 +97,111 @@ export const GUIDE_EDITED = GUIDE_BASE.replace("## Section One", "## Section One
   .replace("will be modified", "HAS been modified")
   .replace("bullet three will change", "bullet three CHANGED");
 
+export const MULTI_MARK_BASE = `---
+title: Multi-mark baseline
+owner: review
+---
+
+# Multi-mark fixture
+
+<!-- Hidden source before. -->
+
+Paragraph first line before.
+Paragraph middle line one.
+Paragraph middle line two.
+Paragraph middle line three.
+Paragraph last line before.
+
+- List first line before.
+  List middle line one.
+  List middle line two.
+  List last line before.
+
+\`\`\`text
+Fence first line before.
+Fence middle line one.
+Fence middle line two.
+Fence last line before.
+\`\`\`
+`;
+
+export const MULTI_MARK_EDITED = MULTI_MARK_BASE.replace(
+  "title: Multi-mark baseline",
+  "title: Multi-mark edited",
+)
+  .replace("Hidden source before.", "Hidden source after.")
+  .replace("Paragraph first line before.", "Paragraph first line after.")
+  .replace("Paragraph last line before.", "Paragraph last line after.")
+  .replace("List first line before.", "List first line after.")
+  .replace("List last line before.", "List last line after.")
+  .replace("Fence first line before.", "Fence first line after.")
+  .replace("Fence last line before.", "Fence last line after.");
+
+const DENSE_MARK_BASE_BODY = Array.from(
+  { length: 18 },
+  (_, i) => `${i % 2 === 0 ? "b" : "s"}${i + 1}`,
+).join("\n");
+const DENSE_MARK_EDITED_BODY = Array.from(
+  { length: 18 },
+  (_, i) => `${i % 2 === 0 ? "A" : "s"}${i + 1}`,
+).join("\n");
+const DENSE_MARK_SUFFIX = `
+
+\`\`\`text
+${"unchanged wide fence content for wrap replay ".repeat(20).trimEnd()}
+\`\`\`
+
+Tail stable before.
+`;
+export const DENSE_MARK_BASE = `${DENSE_MARK_BASE_BODY}${DENSE_MARK_SUFFIX}`;
+export const DENSE_MARK_EDITED = `${DENSE_MARK_EDITED_BODY}${DENSE_MARK_SUFFIX}`;
+
+export const UNEVEN_MARK_BASE = `Uneven first before.
+${"A deliberately oversized unchanged middle line wraps many times. ".repeat(100).trimEnd()}
+Uneven last before.
+`;
+export const UNEVEN_MARK_EDITED = UNEVEN_MARK_BASE.replace(
+  "Uneven first before.",
+  "Uneven first after.",
+).replace("Uneven last before.", "Uneven last after.");
+
+const competingItem = (prefix) =>
+  Array.from(
+    { length: 8 },
+    (_, i) => `${i === 0 ? "- " : "  "}${prefix}${i + 1} ${i % 2 === 0 ? "before" : "stable"}`,
+  ).join("\n");
+export const COMPETING_MARK_BASE = `${competingItem("left-")}\n${competingItem("right-")}\n`;
+export const COMPETING_MARK_EDITED = COMPETING_MARK_BASE.replaceAll("before", "after");
+
+const ORDER_MARK_EARLY_BASE = Array.from(
+  { length: 60 },
+  (_, i) => `early-${i + 1}-${i % 2 === 0 ? "before" : "stable"}`,
+).join("\n");
+const ORDER_MARK_EARLY_EDITED = ORDER_MARK_EARLY_BASE.replaceAll("before", "after");
+const ORDER_MARK_LATE_BASE = `Later before ${"a very wide unchanged tail ".repeat(250).trimEnd()}`;
+const ORDER_MARK_LATE_EDITED = ORDER_MARK_LATE_BASE.replace("Later before", "Later after");
+export const ORDER_MARK_BASE = `${ORDER_MARK_EARLY_BASE}\n\n${ORDER_MARK_LATE_BASE}\n`;
+export const ORDER_MARK_EDITED = `${ORDER_MARK_EARLY_EDITED}\n\n${ORDER_MARK_LATE_EDITED}\n`;
+
+export const OVERFLOW_MARK_BASE = `${Array.from(
+  { length: 240 },
+  (_, i) => `${i % 2 === 0 ? "b" : "s"}${i + 1}`,
+).join("\n")}\n`;
+export const OVERFLOW_MARK_EDITED = `${Array.from(
+  { length: 240 },
+  (_, i) => `${i % 2 === 0 ? "A" : "s"}${i + 1}`,
+).join("\n")}\n`;
+
+export const CROSS_BLOCK_BASE = `- first item stable
+  first boundary before
+- second boundary before
+  second item stable
+`;
+export const CROSS_BLOCK_EDITED = CROSS_BLOCK_BASE.replace(
+  "first boundary before",
+  "first boundary after",
+).replace("second boundary before", "second boundary after");
+
 // One mdsvex document carrying every region the composite grammar has to keep
 // apart: YAML frontmatter, a typed <script>, Markdown prose/lists, a component
 // with a directive, control-flow and {@html} blocks, a fenced code block, and a
@@ -269,6 +374,13 @@ export function makeFixtureRepo() {
   mkdirSync(join(dir, "docs"));
   writeFileSync(join(dir, "src/util.py"), UTIL_BASE);
   writeFileSync(join(dir, "docs/guide.md"), GUIDE_BASE);
+  writeFileSync(join(dir, "docs/multi-mark.md"), MULTI_MARK_BASE);
+  writeFileSync(join(dir, "docs/dense-mark.md"), DENSE_MARK_BASE);
+  writeFileSync(join(dir, "docs/uneven-mark.md"), UNEVEN_MARK_BASE);
+  writeFileSync(join(dir, "docs/competing-mark.md"), COMPETING_MARK_BASE);
+  writeFileSync(join(dir, "docs/order-mark.md"), ORDER_MARK_BASE);
+  writeFileSync(join(dir, "docs/overflow-mark.md"), OVERFLOW_MARK_BASE);
+  writeFileSync(join(dir, "docs/cross-block.md"), CROSS_BLOCK_BASE);
   writeFileSync(join(dir, "docs/post.svx"), POST_SVX_BASE);
   writeFileSync(join(dir, "docs/toml.svx"), TOML_SVX);
   writeFileSync(join(dir, "docs/at-limit.svx"), SVX_AT_LIMIT);
@@ -297,6 +409,13 @@ export function makeFixtureRepo() {
   writeFileSync(join(dir, "src/util.py"), UTIL_EDITED); // M, 4 separated hunks
   writeFileSync(join(dir, "src/wrapped-change.js"), WRAPPED_CHANGE_EDITED); // M, one long hunk
   writeFileSync(join(dir, "docs/guide.md"), GUIDE_EDITED); // M, 3 changed blocks
+  writeFileSync(join(dir, "docs/multi-mark.md"), MULTI_MARK_EDITED); // M, 8 separated hunks
+  writeFileSync(join(dir, "docs/dense-mark.md"), DENSE_MARK_EDITED); // M, 9 alternating hunks
+  writeFileSync(join(dir, "docs/uneven-mark.md"), UNEVEN_MARK_EDITED); // M, 2 hunks around wrap
+  writeFileSync(join(dir, "docs/competing-mark.md"), COMPETING_MARK_EDITED); // M, 2 competing stacks
+  writeFileSync(join(dir, "docs/order-mark.md"), ORDER_MARK_EDITED); // M, dense then tall
+  writeFileSync(join(dir, "docs/overflow-mark.md"), OVERFLOW_MARK_EDITED); // M, 120 hunks
+  writeFileSync(join(dir, "docs/cross-block.md"), CROSS_BLOCK_EDITED); // M, 1 sibling hunk
   writeFileSync(join(dir, "docs/post.svx"), POST_SVX_EDITED); // M, script + prose hunks
   writeFileSync(join(dir, "docs/new.md"), "# Brand new\n\nAll of this is new.\n"); // U
   // Past MAX_HL_LINES (10k in app.js): must fall back to plain source with a

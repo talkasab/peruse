@@ -4,6 +4,84 @@ Narrative record of work sessions — what changed, what we learned, and why.
 Newest first. (The [CHANGELOG](../CHANGELOG.md) is the user-facing summary;
 this is the engineering story.)
 
+## 2026-08-06 — Every Markdown change gets a reachable mark (#24)
+
+- Reproduced the collapse with one fixture containing seven separated edits
+  across frontmatter, one paragraph, one list item, and one fence: the header
+  reported 7 changes but the scalar block mapping rendered only 3 rail marks.
+  The regression now also changes an HTML comment, which produces no rendered
+  element, for 8 total changes and an explicit fallback-anchor case.
+- Markdown blocks now carry lists of hunk indices. Innermost ownership is
+  resolved independently per hunk, so a nested block can own one change while
+  an ancestor remains the correct anchor for another. Frontmatter cards gained
+  exact source ranges; any still-unrendered hunk is assigned to the nearest
+  source-mapped block (or the article when there are none).
+- The initial rail rendered one bar per hunk at a source-line fraction of its
+  shared block. That passed the first/last paragraph, list, and fence fixture,
+  but round-2 review showed the geometry model itself was wrong; the final
+  compact model is recorded below.
+- Initial Chromium verification measured 8 header changes, 8 marks at x=290,
+  direct mark → popup indices 0 through 7, and an arrow cycle of 0…7→0. The
+  historical first red fixture had 7 counted changes / 3 marks; adding the
+  no-output HTML-comment case made the current regression 8 / 3 before the
+  ownership fix. This supersedes the shorter `7/3` wording in the early plan.
+
+### 2026-08-06 addendum — collision-safe shared-block geometry
+
+- Adversarial review found two release blockers in the proportional model. A
+  21 px paragraph with nine alternating `-U0` hunks produced overlapping 6 px
+  marks whose centers hit later changes. A three-source-line paragraph with a
+  heavily wrapped middle line produced marks roughly one third of the 4,242 px
+  block—far from either short changed line.
+- Shared blocks now use a deliberately compact representation: fixed 6 px
+  marks, stacked in source order with 2 px gaps. A stack begins at its block
+  when possible and moves as a unit to the nearest free rail segment if it
+  would collide with another block's marks. It says “changes in this block, in
+  order” rather than claiming false visual-line coverage. Single-change bars
+  stay fixed at the original full-block geometry. Nearest-block fallback marks
+  are hollow/dashed to identify their approximate placement.
+- Coordinate-level Chromium verification found no overlapping rectangles and
+  exact center-hit/popup/diff mappings for all 9 dense changes, both uneven
+  changes, and all 8 original changes. The dense stack ran from y=105 through
+  y=175 in 6 px bars with 2 px gaps; the uneven 4,242 px block used only y=123–
+  137. Existing single-change guide geometry remained `(x,y,h)` `(290,302,55)`,
+  `(290,367,21)`, `(290,442,21)`, identical to the released 1.0.0 measurements.
+- Final round-2 gates: `bun run check` clean; `bun run test` 144/0 with 424
+  assertions; `bun run test:e2e` 30/0 with 279 assertions.
+
+### 2026-08-06 addendum — global ordering and over-capacity navigation
+
+- Round-3 review found that reserving full-block bars before placing compact
+  stacks could move an early 30-change stack 1,422 px below a later change. It
+  also found that arrows still scrolled the owning block, leaving change 120's
+  displaced mark and popup offscreen, and that one hunk spanning sibling list
+  items acquired two marks whose popup used only the first anchor.
+- The final packer flattens compact and full-block bars into one source-ordered
+  sequence. Each bar uses the greater of its natural top or the preceding
+  bar's bottom plus the 2 px gap. Overflow therefore cascades later entries
+  downward instead of inverting source order; where natural bars do not
+  compete, their geometry is unchanged. A cross-sibling hunk belongs once to
+  the innermost block containing its first changed line.
+- Mark clicks and arrows now use the selected rail mark for vertical popup
+  anchoring and adjust `#viewer-scroll` after insertion so both the mark and
+  popup header intersect the viewport. In the 120-hunk fixture, forward and
+  reverse selection of hunk 119 put the mark at y=607–613 and the header at
+  y=620–648.25 inside the y=81–800 pane (`scrollTop=450`).
+- Red proof against round-2 geometry: `bun run test:e2e` passed 31 and failed
+  3 of 34 tests with 338 assertions. The failures measured the early stack at
+  y=1,527 instead of its y=105 block, left both late mark and header invisible
+  at `scrollTop=0`, and rendered two marks for the one sibling-spanning hunk.
+- Final Chromium measurements placed the two competing four-mark stacks at
+  y=105–167 in strict 8 px steps; placed the 30 early bars at y=105–343 and
+  the later full-block bar at y=345 without crossing; retained one sibling
+  mark, one header change, and the popup's 6 px anchor gap; and preserved
+  ordered 9- then 10-mark layouts through wrap and SSE re-render. The released
+  guide fixture remained exactly `(x,y,h)` `(290,302,55)`, `(290,367,21)`,
+  `(290,442,21)`.
+- Final round-3 gates: `bun run check` clean; `bun run test` 144/0 with 424
+  assertions; `bun run test:e2e` 35/0 with 377 assertions (the required
+  project-switcher invocation was 1/0/1 and the main invocation 34/0/376).
+
 ## 2026-08-06 — 1.0.0 released; npm trusted publishing automated (#2)
 
 - First public release: `@talkasab/peruse@1.0.0` on npm (`latest`), GitHub

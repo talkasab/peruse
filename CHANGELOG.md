@@ -11,6 +11,13 @@ date and becomes the GitHub release notes (see
 
 ## [Unreleased]
 
+### Fixed
+- Rendered Markdown now gives every change a distinct, clickable mark when
+  several edits share one paragraph, list item, or code block—even when the
+  block is densely edited or unevenly wrapped. Frontmatter and changes with no
+  rendered output are reachable too; marks stay in source order, and arrow
+  navigation brings each selected mark and diff into view (#24)
+
 ## [1.0.0] - 2026-08-06
 
 ### Fixed

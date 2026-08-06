@@ -333,10 +333,29 @@ worktree dropdown in the header, and theme + word-wrap preference in
     gutter convention. In wrap mode, added/modified bars span the logical
     line's full visual height; the deletion wedge remains a single indicator
     anchored to its first row.
-  - Markdown: a fixed change rail left of **all** content — overlay bars,
-    JS-measured per marked block (`offsetTop`/`offsetHeight` against the
-    positioned `#viewer`), one x at any nesting depth, re-laid on resize
-    via ResizeObserver. The **innermost** intersecting block is marked.
+  - Markdown: a fixed change rail left of **all** content — one overlay bar
+    per change, JS-measured from its rendered block (`offsetTop`/`offsetHeight`
+    against the positioned `#viewer`), one x at any nesting depth, re-laid on
+    resize via ResizeObserver. A block owns a list of changes; the
+    **innermost** intersecting block wins independently for each change. A
+    hunk is owned once, by the innermost block containing its first changed
+    source line; a hunk crossing sibling blocks therefore has one mark on the
+    first sibling. A single change keeps the original full-block bar. When
+    several changes share a block, they use 6 px bars with 2 px gaps. All bars,
+    including full-block bars, then pass through one source-ordered top-to-bottom
+    sweep: each stays at its natural position unless that would overlap its
+    predecessor, in which case it moves to 2 px below it. Ordinary files keep
+    their natural geometry exactly. In an over-capacity region, compact marks
+    may extend beyond their block and the displacement deliberately cascades
+    into later entries; source order is never inverted and every center remains
+    an independent hit target. This compact form means
+    “these changes occur in this block, in this order”—it deliberately does
+    not claim proportional visual-line coverage, because Markdown source lines
+    can collapse together or wrap to radically different heights.
+    Frontmatter cards carry their source range. A change with no rendered
+    output uses the nearest source-mapped block, so no counted change is left
+    without an anchor; its hollow dashed mark distinguishes that placement as
+    approximate rather than accusing the visible block itself.
   - Wholly-new files (status U/A) get **no** in-file marks — the status
     badge already says it all.
   - Click a mark → that change's diff in a **popup** anchored at the mark
@@ -344,8 +363,11 @@ worktree dropdown in the header, and theme + word-wrap preference in
     just the hunk; unified default, split toggle; one popup at a time;
     dismissed by re-click, ✕, Esc, or click-outside. Pure additions get
     marks but **no popup** (the content is already visible).
-  - Header chip `‹ N changes ›` counts and steps through
-    modified/deleted changes, scrolling each into view.
+  - Header chip `‹ N changes ›` counts and steps through every reachable
+    modified/deleted change; the count and complete navigation cycle are the
+    same size. Mark clicks and arrow navigation reveal the selected rail mark
+    and at least the popup header inside `#viewer-scroll`, including when a
+    compact stack is taller than the viewport.
 - **Feedback**: selecting a file shows a floating "rendering …" pill,
   `position: sticky` at the top of `#viewer-scroll` so it pins to the
   viewport at any scroll depth; its spinner is transform-animated so the
