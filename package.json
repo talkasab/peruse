@@ -1,6 +1,6 @@
 {
   "name": "@talkasab/peruse",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Lightweight local directory viewer: markdown, syntax highlighting, git-aware inline hunk diffs, live updates",
   "license": "MIT",
   "type": "module",
@@ -12,7 +12,10 @@
     "server",
     "dist"
   ],
-  "repository": "github:talkasab/peruse",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/talkasab/peruse.git"
+  },
   "scripts": {
     "build": "bun build web/app.js --outdir dist --minify && cp web/index.html web/style.css node_modules/diff2html/bundles/css/diff2html.min.css node_modules/@catppuccin/palette/css/catppuccin.css dist/",
     "lint": "biome ci .",
