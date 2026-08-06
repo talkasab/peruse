@@ -4,6 +4,22 @@ Narrative record of work sessions — what changed, what we learned, and why.
 Newest first. (The [CHANGELOG](../CHANGELOG.md) is the user-facing summary;
 this is the engineering story.)
 
+## 2026-08-06 — 1.0.0 released; npm trusted publishing automated (#2)
+
+- First public release: `@talkasab/peruse@1.0.0` on npm (`latest`), GitHub
+  Release v1.0.0 with notes extracted from the changelog section.
+- Release automation is GitHub Actions + npm OIDC trusted publishing — no
+  tokens. Key constraint learned: npm only offers trusted-publisher settings
+  on an already-published package, so 1.0.0 was bootstrapped with one manual
+  `npm publish` and the workflow's publish step is an idempotent guard
+  (`npm view` before `npm publish`); its "already on the registry — skipping"
+  path was exercised by the real 1.0.0 run. Later releases are fully
+  automatic: roll changelog → `npm version` → `git push --follow-tags`.
+- `npm pkg fix` normalized the `repository` field before tagging so the
+  published package.json byte-matches the repository's. Reminder that
+  `git push --follow-tags` only pushes *annotated* tags — recreating a
+  deleted npm-version tag by hand needs `git tag -a`.
+
 ## 2026-08-05 (integration) — Four-branch batch merged: #17, #28, #18, #25
 
 - Landed in the order #17 → #28 → #18 → #25, chosen so the watcher branch's

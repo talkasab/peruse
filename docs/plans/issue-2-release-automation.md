@@ -1,6 +1,6 @@
 # Issue #2: Release automation — npm trusted publishing on tag
 
-Status: complete (implementation; awaiting the owner's bootstrap release)
+Status: complete (1.0.0 released 2026-08-06; workflow verified end-to-end)
 Date: 2026-08-06
 
 ## Decision: GitHub Actions + npm trusted publishing (OIDC)
