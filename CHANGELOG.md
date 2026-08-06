@@ -11,6 +11,10 @@ date and becomes the GitHub release notes (see
 
 ## [Unreleased]
 
+### Fixed
+- Hunk diff popups now open above change marks near the bottom of the file
+  pane when the full popup fits there, avoiding unnecessary scrolling (#9)
+
 ### Added
 - Browser tabs now identify the server machine and selected project or
   parent-qualified worktree route, staying accurate through rapid switches and

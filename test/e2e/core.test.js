@@ -137,6 +137,174 @@ describe("code review journey", () => {
   );
 });
 
+describe("popup orientation", () => {
+  const positionAnchor = async (selector, viewportOffset) => {
+    await page.locator(selector).evaluate((element, offset) => {
+      const scroll = document.querySelector("#viewer-scroll");
+      scroll.scrollTop = element.offsetTop - offset;
+    }, viewportOffset);
+    await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(resolve)));
+  };
+
+  const geometry = async (selector) =>
+    page.evaluate((anchorSelector) => {
+      const rect = (element) => {
+        const box = element.getBoundingClientRect();
+        return { top: box.top, bottom: box.bottom, height: box.height };
+      };
+      return {
+        pane: rect(document.querySelector("#viewer-scroll")),
+        anchor: rect(document.querySelector(anchorSelector)),
+        popup: rect(document.querySelector(".hunk-popup")),
+        header: rect(document.querySelector(".hunk-popup .hp-bar")),
+      };
+    }, selector);
+
+  const clickCenter = async (selector) => {
+    const box = await page.locator(selector).boundingBox();
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+    await page.waitForSelector(".hunk-popup");
+  };
+
+  test(
+    "a Markdown rail popup opens above a mark near the pane bottom (#9)",
+    async () => {
+      await openFile("docs/popup-position.md");
+      await page.waitForFunction(() => document.querySelectorAll(".rail-mark").length === 2);
+      const selector = '.rail-mark[data-hunk="1"]';
+      const paneHeight = await page
+        .locator("#viewer-scroll")
+        .evaluate((element) => element.clientHeight);
+      await positionAnchor(selector, paneHeight - 24);
+      await clickCenter(selector);
+      const measured = await geometry(selector);
+      expect(measured.popup.height).toBeLessThan(measured.anchor.top - measured.pane.top);
+      expect(measured.popup.height).toBeGreaterThan(measured.pane.bottom - measured.anchor.bottom);
+      expect(Math.abs(measured.popup.bottom - (measured.anchor.top - 6))).toBeLessThanOrEqual(1);
+
+      await page.click(".hp-view");
+      const split = await geometry(selector);
+      expect(Math.abs(split.popup.height - measured.popup.height)).toBeGreaterThan(1);
+      expect(Math.abs(split.popup.bottom - (split.anchor.top - 6))).toBeLessThanOrEqual(1);
+    },
+    T,
+  );
+
+  test(
+    "a Markdown rail popup still opens below a mid-pane mark (#9)",
+    async () => {
+      await openFile("docs/popup-position.md");
+      await page.waitForFunction(() => document.querySelectorAll(".rail-mark").length === 2);
+      const selector = '.rail-mark[data-hunk="0"]';
+      await positionAnchor(selector, 180);
+      await clickCenter(selector);
+      const measured = await geometry(selector);
+      expect(measured.popup.height).toBeLessThan(measured.pane.bottom - measured.anchor.bottom);
+      expect(Math.abs(measured.popup.top - (measured.anchor.bottom + 6))).toBeLessThanOrEqual(1);
+    },
+    T,
+  );
+
+  test(
+    "pane resize preserves and reorients an open popup (#9)",
+    async () => {
+      await openFile("docs/popup-position.md");
+      await page.waitForFunction(() => document.querySelectorAll(".rail-mark").length === 2);
+      const selector = '.rail-mark[data-hunk="1"]';
+      const paneHeight = await page
+        .locator("#viewer-scroll")
+        .evaluate((element) => element.clientHeight);
+      await positionAnchor(selector, paneHeight - 24);
+      await clickCenter(selector);
+      expect(await page.locator(".hunk-popup").getAttribute("data-orientation")).toBe("above");
+      try {
+        await page.setViewportSize({ width: 1280, height: 1100 });
+        await page.waitForFunction(
+          () => document.querySelector(".hunk-popup")?.getAttribute("data-orientation") === "below",
+        );
+        const measured = await geometry(selector);
+        expect(Math.abs(measured.popup.top - (measured.anchor.bottom + 6))).toBeLessThanOrEqual(1);
+      } finally {
+        await page.setViewportSize({ width: 1280, height: 800 });
+      }
+    },
+    T,
+  );
+
+  test(
+    "arrow navigation keeps a bottom Markdown mark and popup header visible (#9, #24)",
+    async () => {
+      await openFile("docs/popup-position.md");
+      await page.waitForFunction(() => document.querySelectorAll(".rail-mark").length === 2);
+      await page.keyboard.press("Escape");
+      await page.click("[title='Next change']");
+      expect(await page.locator(".hunk-popup").getAttribute("data-hunk")).toBe("0");
+      await page.click("[title='Next change']");
+      expect(await page.locator(".hunk-popup").getAttribute("data-hunk")).toBe("1");
+      const measured = await geometry('.rail-mark[data-hunk="1"]');
+      const intersects = (box) => box.bottom > measured.pane.top && box.top < measured.pane.bottom;
+      expect(intersects(measured.anchor)).toBe(true);
+      expect(intersects(measured.header)).toBe(true);
+    },
+    T,
+  );
+
+  test(
+    "a code-line popup opens above an anchor near the pane bottom (#9)",
+    async () => {
+      await openFile("src/popup-position.js");
+      await page.waitForFunction(() => document.querySelectorAll(".line[data-hunk]").length === 2);
+      const selector = '.line[data-hunk="1"]';
+      const paneHeight = await page
+        .locator("#viewer-scroll")
+        .evaluate((element) => element.clientHeight);
+      await positionAnchor(selector, paneHeight - 24);
+      const box = await page.locator(selector).boundingBox();
+      await page.mouse.click(box.x + 20, box.y + box.height / 2);
+      await page.waitForSelector(".hunk-popup");
+      const measured = await geometry(selector);
+      expect(measured.popup.height).toBeLessThan(measured.anchor.top - measured.pane.top);
+      expect(measured.popup.height).toBeGreaterThan(measured.pane.bottom - measured.anchor.bottom);
+      expect(Math.abs(measured.popup.bottom - (measured.anchor.top - 6))).toBeLessThanOrEqual(1);
+    },
+    T,
+  );
+
+  test(
+    "popups too tall for either side retain below placement in both families (#9, #24)",
+    async () => {
+      await page.setViewportSize({ width: 1280, height: 320 });
+      try {
+        for (const subject of [
+          { path: "docs/popup-position.md", selector: '.rail-mark[data-hunk="0"]', gutter: false },
+          { path: "src/popup-position.js", selector: '.line[data-hunk="0"]', gutter: true },
+        ]) {
+          await openFile(subject.path);
+          await page.waitForSelector(subject.selector);
+          await positionAnchor(subject.selector, 100);
+          const box = await page.locator(subject.selector).boundingBox();
+          await page.mouse.click(
+            box.x + (subject.gutter ? 20 : box.width / 2),
+            box.y + box.height / 2,
+          );
+          await page.waitForSelector(".hunk-popup");
+          const measured = await geometry(subject.selector);
+          expect(measured.popup.height).toBeGreaterThan(measured.anchor.top - measured.pane.top);
+          expect(measured.popup.height).toBeGreaterThan(
+            measured.pane.bottom - measured.anchor.bottom,
+          );
+          expect(Math.abs(measured.popup.top - (measured.anchor.bottom + 6))).toBeLessThanOrEqual(
+            1,
+          );
+        }
+      } finally {
+        await page.setViewportSize({ width: 1280, height: 800 });
+      }
+    },
+    T,
+  );
+});
+
 describe("markdown review journey", () => {
   test(
     "every change sharing a Markdown block has its own reachable rail mark (#24)",

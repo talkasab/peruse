@@ -263,8 +263,14 @@ Alpine.data("peruse", () => ({
     await this.refreshProjects();
     if (!this.projectName) return;
     this.$refs.viewer.addEventListener("click", (e) => this.viewerClick(e));
-    // reflow (pane resize, images loading) moves blocks → re-lay the rail
-    new ResizeObserver(() => this.layoutRails()).observe(this.$refs.viewer);
+    // Reflow (pane resize, images loading) moves blocks: re-lay the rail and
+    // remeasure an open popup against its replacement mark.
+    const reflowObserver = new ResizeObserver(() => {
+      this.layoutRails();
+      this.positionOpenPanel();
+    });
+    reflowObserver.observe(this.$refs.viewer);
+    reflowObserver.observe(this.$refs.scroll);
     addEventListener("hashchange", () => this.onHash());
     addEventListener("keydown", (e) => {
       if (e.key === "Escape") this.closeAllPanels();
@@ -688,6 +694,36 @@ Alpine.data("peruse", () => ({
       target = bottom - scroll.clientHeight + padding;
     scroll.scrollTop = target;
   },
+  /** @param {HTMLElement} popup @param {HTMLElement} anchor @param {HTMLElement} verticalAnchor */
+  positionPanel(popup, anchor, verticalAnchor) {
+    const isLine = anchor.classList.contains("line");
+    popup.style.left = `${anchor.offsetLeft + (isLine ? this.codeGutterPx(anchor) : 0)}px`;
+    const anchorTop = verticalAnchor.offsetTop;
+    const anchorBottom = anchorTop + verticalAnchor.offsetHeight;
+    const popupHeight = popup.offsetHeight;
+    const scroll = this.$refs.scroll;
+    const spaceAbove = anchorTop - scroll.scrollTop;
+    const spaceBelow = scroll.scrollTop + scroll.clientHeight - anchorBottom;
+    const needed = popupHeight + 6;
+    const above = needed > spaceBelow && needed <= spaceAbove;
+    popup.dataset.orientation = above ? "above" : "below";
+    popup.style.top = `${above ? anchorTop - popupHeight - 6 : anchorBottom + 6}px`;
+  },
+  positionOpenPanel() {
+    const popup = /** @type {HTMLElement | null} */ (
+      this.$refs.viewer.querySelector(".hunk-popup")
+    );
+    if (!popup) return;
+    const i = Number(popup.dataset.hunk);
+    const anchor = this.anchorFor(i);
+    if (!anchor) return;
+    const verticalAnchor = anchor.classList.contains("line")
+      ? anchor
+      : /** @type {HTMLElement | null} */ (
+          this.$refs.viewer.querySelector(`.rail-mark[data-hunk="${i}"]`)
+        );
+    this.positionPanel(popup, anchor, verticalAnchor ?? anchor);
+  },
   /**
    * @param {number} i
    * @param {DiffMode} [mode]
@@ -709,8 +745,7 @@ Alpine.data("peruse", () => ({
         this.$refs.viewer.querySelector(`.rail-mark[data-hunk="${i}"]`)
       );
     const verticalAnchor = isLine ? anchor : (railAnchor ?? anchor);
-    popup.style.left = `${anchor.offsetLeft + (isLine ? this.codeGutterPx(anchor) : 0)}px`;
-    popup.style.top = `${verticalAnchor.offsetTop + verticalAnchor.offsetHeight + 6}px`;
+    this.positionPanel(popup, anchor, verticalAnchor);
     if (reveal) this.revealReview(verticalAnchor, popup);
     return popup;
   },
@@ -741,6 +776,13 @@ Alpine.data("peruse", () => ({
     body.innerHTML = sanitizeHTML(
       renderDiff(this.file.path, this.file.hunks[Number(panel.dataset.hunk)], mode),
     );
+    this.positionOpenPanel();
+    const i = Number(panel.dataset.hunk);
+    const anchor = this.anchorFor(i);
+    const verticalAnchor = /** @type {HTMLElement | null} */ (
+      this.$refs.viewer.querySelector(`.line[data-hunk="${i}"], .rail-mark[data-hunk="${i}"]`)
+    );
+    if (anchor && verticalAnchor) this.revealReview(verticalAnchor, panel);
   },
   closeAllPanels() {
     for (const p of this.$refs.viewer.querySelectorAll(".hunk-popup")) p.remove();

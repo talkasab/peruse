@@ -65,6 +65,15 @@ def save(path, data):
 # trailing addition
 `;
 
+export const POPUP_CODE_BASE = `${Array.from(
+  { length: 80 },
+  (_, i) => `const line${String(i + 1).padStart(2, "0")} = "before-${i + 1}";`,
+).join("\n")}\n`;
+export const POPUP_CODE_EDITED = POPUP_CODE_BASE.replace(
+  'const line10 = "before-10";',
+  'const line10 = "after-10";',
+).replace('const line70 = "before-70";', 'const line70 = "after-70";');
+
 export const GUIDE_BASE = `---
 Created: 2026-07-20
 Status: Active
@@ -96,6 +105,24 @@ ${"a wide fenced line with no line-number gutter to hang under ".repeat(6).trimE
 export const GUIDE_EDITED = GUIDE_BASE.replace("## Section One", "## Section One Edited")
   .replace("will be modified", "HAS been modified")
   .replace("bullet three will change", "bullet three CHANGED");
+
+export const POPUP_MARKDOWN_BASE = `${Array.from(
+  { length: 24 },
+  (_, i) => `Lead paragraph ${i + 1} stays unchanged.`,
+).join("\n\n")}
+
+First popup change before.
+
+${Array.from({ length: 24 }, (_, i) => `Middle paragraph ${i + 1} stays unchanged.`).join("\n\n")}
+
+Bottom popup change before.
+
+${Array.from({ length: 12 }, (_, i) => `Tail paragraph ${i + 1} stays unchanged.`).join("\n\n")}
+`;
+export const POPUP_MARKDOWN_EDITED = POPUP_MARKDOWN_BASE.replace(
+  "First popup change before.",
+  "First popup change after.",
+).replace("Bottom popup change before.", "Bottom popup change after.");
 
 export const MULTI_MARK_BASE = `---
 title: Multi-mark baseline
@@ -373,7 +400,9 @@ export function makeFixtureRepo() {
   mkdirSync(join(dir, "src"));
   mkdirSync(join(dir, "docs"));
   writeFileSync(join(dir, "src/util.py"), UTIL_BASE);
+  writeFileSync(join(dir, "src/popup-position.js"), POPUP_CODE_BASE);
   writeFileSync(join(dir, "docs/guide.md"), GUIDE_BASE);
+  writeFileSync(join(dir, "docs/popup-position.md"), POPUP_MARKDOWN_BASE);
   writeFileSync(join(dir, "docs/multi-mark.md"), MULTI_MARK_BASE);
   writeFileSync(join(dir, "docs/dense-mark.md"), DENSE_MARK_BASE);
   writeFileSync(join(dir, "docs/uneven-mark.md"), UNEVEN_MARK_BASE);
@@ -407,8 +436,10 @@ export function makeFixtureRepo() {
 
   // worktree state
   writeFileSync(join(dir, "src/util.py"), UTIL_EDITED); // M, 4 separated hunks
+  writeFileSync(join(dir, "src/popup-position.js"), POPUP_CODE_EDITED); // M, 2 popup anchors
   writeFileSync(join(dir, "src/wrapped-change.js"), WRAPPED_CHANGE_EDITED); // M, one long hunk
   writeFileSync(join(dir, "docs/guide.md"), GUIDE_EDITED); // M, 3 changed blocks
+  writeFileSync(join(dir, "docs/popup-position.md"), POPUP_MARKDOWN_EDITED); // M, 2 popup anchors
   writeFileSync(join(dir, "docs/multi-mark.md"), MULTI_MARK_EDITED); // M, 8 separated hunks
   writeFileSync(join(dir, "docs/dense-mark.md"), DENSE_MARK_EDITED); // M, 9 alternating hunks
   writeFileSync(join(dir, "docs/uneven-mark.md"), UNEVEN_MARK_EDITED); // M, 2 hunks around wrap

@@ -373,9 +373,17 @@ not create a refetch loop.
     badge already says it all.
   - Click a mark → that change's diff in a **popup** anchored at the mark
     (JetBrains-style; never a whole-page diff view). diff2html renders
-    just the hunk; unified default, split toggle; one popup at a time;
-    dismissed by re-click, ✕, Esc, or click-outside. Pure additions get
-    marks but **no popup** (the content is already visible).
+    just the hunk; unified default, split toggle; one popup at a time. After
+    rendering, the shared code-line/Markdown-rail placement path measures the
+    popup against the `#viewer-scroll` viewport. It normally places the popup
+    6 px below the selected mark; when the full popup plus gap does not fit
+    below but does fit above, its bottom sits 6 px above the mark. If neither
+    side fits, placement remains below and ensure-visible scrolling keeps the
+    selected mark and at least the popup header visible. Split/unified changes
+    remeasure and may change orientation; pane/content resize keeps the popup
+    open and repositions it, while word-wrap changes close it before reflow.
+    Popups are dismissed by re-click, ✕, Esc, or click-outside. Pure additions
+    get marks but **no popup** (the content is already visible).
   - Header chip `‹ N changes ›` counts and steps through every reachable
     modified/deleted change; the count and complete navigation cycle are the
     same size. Mark clicks and arrow navigation reveal the selected rail mark
@@ -437,12 +445,14 @@ they guard.
   the composed watcher/cache lifecycle — route invalidation settling a
   scan-broken runtime's pending readiness, runtime-level startup coalescing,
   and SSE stream EOF when a recovered runtime is invalidated).
-- `bun run test:e2e` → **E2E** (`test/e2e/`): six core Chromium journeys —
-  smoke, code review (exact marks, popup scope), markdown review (rail
-  single-x measurement, innermost marks, arrows, links, pinned headers,
-  no body scroll), live updates, theming (Latte/Mocha token + popup color
-  flip), mdsvex `.svx` (per-region computed colours in both themes, line-for-line
-  source fidelity, gutter marks and popup, oversized-file fallback) — plus two
+- `bun run test:e2e` → **E2E** (`test/e2e/`): core Chromium journeys —
+  smoke, code review (exact marks, popup scope), popup orientation (measured
+  above/below gaps for code and Markdown, neither-fits fallback, navigation,
+  split-height changes, and resize), markdown review (rail single-x
+  measurement, innermost marks, arrows, links, pinned headers, no body scroll),
+  live updates, theming (Latte/Mocha token + popup color flip), mdsvex `.svx`
+  (per-region computed colours in both themes, line-for-line source fidelity,
+  gutter marks and popup, oversized-file fallback) — plus two
   self-contained regressions, each with its own fixture,
   server, and fresh page: Markdown sanitization (inert hostile HTML alongside
   preserved README/task-list/Shiki rendering in the live DOM) and navigation

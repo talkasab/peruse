@@ -4,6 +4,34 @@ Narrative record of work sessions — what changed, what we learned, and why.
 Newest first. (The [CHANGELOG](../CHANGELOG.md) is the user-facing summary;
 this is the engineering story.)
 
+## 2026-08-06 — Hunk popups flip above short bottom space (#9)
+
+- A focused Chromium regression placed a Markdown rail mark 24 px from the
+  pane bottom and failed twice against the released placement code by exactly
+  256.75 px: `openPanel()` always used mark-bottom + 6 regardless of rendered
+  popup height. Both popup families use that path, so the fix is shared rather
+  than renderer-specific.
+- Placement now measures the post-render popup and the selected code line or
+  rail mark in `#viewer-scroll` coordinates. Below remains the default; above
+  is selected only when popup + 6 px cannot fit below and can fit above. If
+  neither direction fits, below remains the deliberate fallback so issue #24's
+  mark/header ensure-visible behavior handles the over-capacity case.
+- Split/unified changes re-render and re-place immediately, then preserve mark
+  and header visibility. A resize keeps the popup open as before but now
+  observes the scroll viewport as well as viewer content, re-lays Markdown
+  rails, and remeasures orientation. Word wrap continues to close popups.
+- Chromium measurements (719 px pane, 223.75 px popup) covered both families.
+  Markdown below/above spaces were 518/180 px (below, 6 px gap) and 3/695 px
+  (above, 6.25 px painted gap); code spaces were 523.625/180.375 px (below,
+  5.625 px painted gap) and 9.125/694.875 px (above, 6.125 px painted gap).
+  In a 239 px pane neither side fit: Markdown had 100/118 px above/below and
+  code 100.375/123.625 px; both retained below placement with painted gaps of
+  6 and 5.625 px respectively. Fractional painted values come from line and
+  diff layout rounding; style-coordinate placement is exactly 6 px.
+- Final gates: `bun run check` clean after formatting the new e2e block;
+  `bun run test` 144/0 with 424 assertions; `bun run test:e2e` 41/0 with 405
+  assertions (the required project-switcher invocation was 1/0/1 and the main
+  invocation 40/0/404).
 ## 2026-08-06 — Server and project context in page titles (#33)
 
 - `/api/projects` now carries the server's `os.hostname()` so browsers opened
@@ -53,7 +81,6 @@ this is the engineering story.)
   targets clean; `bun run test` passed 144/144 with 428 assertions; and
   `bun run test:e2e` passed 35/35 with 395 assertions (1/19 in the isolated
   switcher process and 34/376 in the main process).
-
 ## 2026-08-06 — Every Markdown change gets a reachable mark (#24)
 
 - Reproduced the collapse with one fixture containing seven separated edits
