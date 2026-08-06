@@ -19,6 +19,8 @@ date and becomes the GitHub release notes (see
 - Browser tabs now identify the server machine and selected project or
   parent-qualified worktree route, staying accurate through rapid switches and
   project removal (#33)
+- Open text files now have a **Copy raw** action that copies their exact source,
+  with clipboard fallback and visible success or permission feedback (#19)
 
 ## [1.0.1] - 2026-08-06
 

@@ -104,9 +104,14 @@
         </span>
         <button type="button" class="chip" x-show="isMarkdown && !file?.binary" @click="raw = !raw"
                 x-text="raw ? 'Rendered' : 'Raw'"></button>
+        <button type="button" class="chip copy-raw" x-show="file && !file.binary"
+                @click="copyRaw()" aria-label="Copy raw file contents"
+                x-text="copyLabel"></button>
         <button type="button" class="chip wrap-btn" x-show="wrapAvailable" @click="toggleWrap()"
                 x-text="wrap ? 'No wrap' : 'Wrap'" title="Toggle word wrap"></button>
       </div>
+      <div class="copy-status" :class="{ 'sr-only': copyState !== 'error' }"
+           role="status" aria-live="polite" x-text="copyAnnouncement"></div>
       <div id="viewer-scroll" x-ref="scroll">
         <div class="render-wait" x-show="loading" x-cloak>
           <span class="spin"></span> rendering <span x-text="loadingName"></span>…

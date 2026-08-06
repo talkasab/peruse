@@ -74,6 +74,17 @@ export const POPUP_CODE_EDITED = POPUP_CODE_BASE.replace(
   'const line10 = "after-10";',
 ).replace('const line70 = "before-70";', 'const line70 = "after-70";');
 
+export const COPY_MARKDOWN = `# Copy source
+
+Unicode: café 🚀
+
+	Tabbed Markdown source
+`;
+
+export const COPY_CODE = `const greeting = "こんにちは";
+	console.log(greeting);
+`;
+
 export const GUIDE_BASE = `---
 Created: 2026-07-20
 Status: Active
@@ -403,6 +414,8 @@ export function makeFixtureRepo() {
   writeFileSync(join(dir, "src/popup-position.js"), POPUP_CODE_BASE);
   writeFileSync(join(dir, "docs/guide.md"), GUIDE_BASE);
   writeFileSync(join(dir, "docs/popup-position.md"), POPUP_MARKDOWN_BASE);
+
+  writeFileSync(join(dir, "docs/copy.md"), COPY_MARKDOWN);
   writeFileSync(join(dir, "docs/multi-mark.md"), MULTI_MARK_BASE);
   writeFileSync(join(dir, "docs/dense-mark.md"), DENSE_MARK_BASE);
   writeFileSync(join(dir, "docs/uneven-mark.md"), UNEVEN_MARK_BASE);
@@ -426,6 +439,7 @@ export function makeFixtureRepo() {
   writeFileSync(join(dir, "docs/wrap-anchor.md"), WRAP_ANCHOR_MARKDOWN);
   writeFileSync(join(dir, "docs/empty.txt"), "");
   writeFileSync(join(dir, "src/wrapped-change.js"), WRAPPED_CHANGE_BASE);
+  writeFileSync(join(dir, "src/copy.js"), COPY_CODE);
   writeFileSync(join(dir, ".gitignore"), "*.log\nignored-dir/\n");
   // Committed and never touched afterward: the negative case for `dirty`/
   // `ignored` flags (a directory/file with real git history but no changes).

@@ -6,6 +6,8 @@ import { appendFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import {
+  COPY_CODE,
+  COPY_MARKDOWN,
   DENSE_MARK_EDITED,
   launchBrowser,
   makeFixtureRepo,
@@ -94,6 +96,229 @@ describe("smoke", () => {
 
 describe("code review journey", () => {
   test(
+    "copy raw preserves exact Markdown and code source with visible feedback (#19)",
+    async () => {
+      await page.context().grantPermissions(["clipboard-read", "clipboard-write"], {
+        origin: srv.origin,
+      });
+
+      await openFile("docs/copy.md");
+      await page.waitForSelector(".markdown-body");
+      const copy = page.locator(".copy-raw");
+      expect(await copy.count()).toBe(1);
+      expect(await copy.getAttribute("aria-label")).toBe("Copy raw file contents");
+      expect(await copy.isVisible()).toBe(true);
+      expect(await page.getByRole("button", { name: "Raw", exact: true }).isVisible()).toBe(true);
+      await copy.focus();
+      expect(
+        await page.evaluate(() => document.activeElement?.classList.contains("copy-raw")),
+      ).toBe(true);
+      await page.keyboard.press("Enter");
+      expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(COPY_MARKDOWN);
+      expect(await copy.innerText()).toBe("Copied");
+      expect(await page.getByRole("button", { name: "Raw", exact: true }).isVisible()).toBe(true);
+      await page.waitForFunction(
+        () => document.querySelector(".copy-raw")?.textContent === "Copy raw",
+      );
+
+      await openFile("src/copy.js");
+      await copy.click();
+      expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(COPY_CODE);
+
+      await openFile("docs/empty.txt");
+      expect(await copy.isVisible()).toBe(true);
+      await copy.click();
+      expect(await page.evaluate(() => navigator.clipboard.readText())).toBe("");
+
+      await openFile("src/copy.js");
+      await page.evaluate(() => {
+        const state = {
+          clipboard: navigator.clipboard,
+          execCommand: document.execCommand.bind(document),
+          payload: null,
+          result: false,
+        };
+        window.__copyFallback = state;
+        Object.defineProperty(navigator, "clipboard", { configurable: true, value: undefined });
+        document.execCommand = (command) => {
+          state.payload = document.activeElement?.value ?? null;
+          state.result = state.execCommand(command);
+          return state.result;
+        };
+      });
+      await copy.click();
+      expect(await copy.innerText()).toBe("Copied");
+      expect(
+        await page.evaluate(() => document.activeElement?.classList.contains("copy-raw")),
+      ).toBe(true);
+      const fallback = await page.evaluate(() => {
+        const state = window.__copyFallback;
+        document.execCommand = state.execCommand;
+        Object.defineProperty(navigator, "clipboard", {
+          configurable: true,
+          value: state.clipboard,
+        });
+        return {
+          payload: state.payload,
+          result: state.result,
+          textareas: document.querySelectorAll("textarea").length,
+        };
+      });
+      expect(fallback).toEqual({ payload: COPY_CODE, result: true, textareas: 0 });
+      expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(COPY_CODE);
+
+      await openFile("data.bin");
+      expect(await copy.isVisible()).toBe(false);
+    },
+    T,
+  );
+
+  test(
+    "latest copy attempt owns feedback when writes complete out of order (#19)",
+    async () => {
+      await page.context().grantPermissions(["clipboard-read", "clipboard-write"], {
+        origin: srv.origin,
+      });
+      await openFile("src/copy.js");
+      const copy = page.locator(".copy-raw");
+      await page.evaluate(() => {
+        const clipboard = navigator.clipboard;
+        const original = clipboard.writeText.bind(clipboard);
+        const attempts = [];
+        window.__copyRace = { attempts, clipboard, original };
+        Object.defineProperty(clipboard, "writeText", {
+          configurable: true,
+          value: (payload) =>
+            new Promise((resolve, reject) => attempts.push({ payload, resolve, reject })),
+        });
+      });
+
+      await copy.click();
+      await copy.click();
+      await page.waitForFunction(() => window.__copyRace?.attempts.length === 2);
+      await page.evaluate(async () => {
+        const race = window.__copyRace;
+        await race.original(race.attempts[1].payload);
+        race.attempts[1].resolve();
+      });
+      await page.waitForFunction(
+        () => document.querySelector(".copy-raw")?.textContent === "Copied",
+      );
+      await page.evaluate(() => {
+        window.__copyRace.attempts[0].reject(new DOMException("denied", "NotAllowedError"));
+      });
+      await page.waitForTimeout(100);
+      expect(await copy.innerText()).toBe("Copied");
+      expect(await page.locator('[role="status"]').innerText()).toBe("Raw file contents copied");
+      expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(COPY_CODE);
+
+      await page.evaluate(() => {
+        const race = window.__copyRace;
+        Object.defineProperty(race.clipboard, "writeText", {
+          configurable: true,
+          value: race.original,
+        });
+        delete window.__copyRace;
+      });
+    },
+    T,
+  );
+
+  test(
+    "fallback copy preserves the rendered text selection (#19)",
+    async () => {
+      await page.context().grantPermissions(["clipboard-read", "clipboard-write"], {
+        origin: srv.origin,
+      });
+      await openFile("docs/copy.md");
+      await page.waitForSelector(".markdown-body");
+      const copy = page.locator(".copy-raw");
+      await page.evaluate(() => {
+        const paragraph = [...document.querySelectorAll(".markdown-body p")].find((element) =>
+          element.textContent?.includes("Unicode"),
+        );
+        const range = document.createRange();
+        range.selectNodeContents(paragraph);
+        const selection = document.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(range);
+        window.__copySelection = { clipboard: navigator.clipboard, text: selection.toString() };
+        Object.defineProperty(navigator, "clipboard", { configurable: true, value: undefined });
+      });
+      await copy.focus();
+      expect(await page.evaluate(() => document.getSelection()?.toString())).toBe(
+        "Unicode: café 🚀",
+      );
+      await page.keyboard.press("Enter");
+      expect(await page.evaluate(() => document.getSelection()?.toString())).toBe(
+        "Unicode: café 🚀",
+      );
+      expect(await page.evaluate(() => document.getSelection()?.rangeCount)).toBe(1);
+      await page.evaluate(() => {
+        Object.defineProperty(navigator, "clipboard", {
+          configurable: true,
+          value: window.__copySelection.clipboard,
+        });
+        delete window.__copySelection;
+      });
+    },
+    T,
+  );
+
+  test(
+    "denied clipboard permission shows an actionable error without changing the view (#19)",
+    async () => {
+      const deniedContext = await browser.newContext();
+      const deniedPage = await deniedContext.newPage();
+      try {
+        await deniedPage.setViewportSize({ width: 500, height: 800 });
+        await deniedPage.goto(`${srv.base}/#/docs/copy.md`);
+        await deniedPage.waitForSelector(".copy-raw");
+        const permission = await deniedPage.evaluate(() =>
+          navigator.permissions.query({ name: "clipboard-write" }).then((result) => result.state),
+        );
+        expect(permission).not.toBe("granted");
+        const copy = deniedPage.locator(".copy-raw");
+        expect(await copy.isVisible()).toBe(true);
+        await copy.click();
+        await deniedPage.waitForFunction(
+          () =>
+            document.querySelector('[role="status"]')?.textContent ===
+            "Copy failed. Allow clipboard access and try again.",
+        );
+        const layout = await deniedPage.evaluate(() => {
+          const pane = document.querySelector("#pane").getBoundingClientRect();
+          const header = document.querySelector("#pane-header");
+          const copyBox = document.querySelector(".copy-raw").getBoundingClientRect();
+          const wrapBox = document.querySelector(".wrap-btn").getBoundingClientRect();
+          return {
+            viewport: innerWidth,
+            documentWidth: document.documentElement.scrollWidth,
+            headerClientWidth: header.clientWidth,
+            headerScrollWidth: header.scrollWidth,
+            paneRight: pane.right,
+            controlsRight: Math.max(copyBox.right, wrapBox.right),
+          };
+        });
+        expect(layout.documentWidth).toBe(layout.viewport);
+        expect(layout.headerScrollWidth).toBeLessThanOrEqual(layout.headerClientWidth);
+        expect(layout.controlsRight).toBeLessThanOrEqual(layout.paneRight + 1);
+        expect(await copy.innerText()).toBe("Copy failed");
+        const status = deniedPage.locator('[role="status"]');
+        expect(await status.isVisible()).toBe(true);
+        expect(await status.innerText()).toBe("Copy failed. Allow clipboard access and try again.");
+        expect(await deniedPage.locator(".markdown-body").isVisible()).toBe(true);
+        expect(await deniedPage.getByRole("button", { name: "Raw", exact: true }).isVisible()).toBe(
+          true,
+        );
+      } finally {
+        await deniedContext.close();
+      }
+    },
+    T,
+  );
+
+  test(
     "marks on exact changed lines; popup shows only the clicked change",
     async () => {
       await openFile("src/util.py");
@@ -129,7 +354,7 @@ describe("code review journey", () => {
       await openFile("docs/new.md");
       await page.waitForSelector(".markdown-body");
       expect(await page.locator(".rail-mark").count()).toBe(0);
-      await page.click("#pane-header button:has-text('Raw')");
+      await page.getByRole("button", { name: "Raw", exact: true }).click();
       await page.waitForSelector(".shiki .line");
       expect(await page.locator(".line.hl-add").count()).toBe(0);
     },
@@ -833,7 +1058,7 @@ describe("mdsvex code view", () => {
       // A code view, never a rendered document — and therefore no Rendered/Raw
       // toggle, which only markdown gets.
       expect(await page.locator(".markdown-body").count()).toBe(0);
-      expect(await page.locator("#pane-header button:has-text('Raw')").isVisible()).toBe(false);
+      expect(await page.getByRole("button", { name: "Raw", exact: true }).isVisible()).toBe(false);
       expect(await page.locator(".notice").count()).toBe(0);
 
       const latte = await palettes(MARKERS);
@@ -1475,7 +1700,7 @@ describe("word wrap (#25)", () => {
       await openFile("README.md");
       await page.waitForSelector(".markdown-body");
       expect(await page.locator(".wrap-btn").isVisible()).toBe(false);
-      await page.click("#pane-header button:has-text('Raw')");
+      await page.getByRole("button", { name: "Raw", exact: true }).click();
       await page.waitForSelector(".shiki .line");
       expect(await page.locator(".wrap-btn").isVisible()).toBe(true);
 

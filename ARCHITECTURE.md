@@ -314,6 +314,19 @@ not create a refetch loop.
   ordinary `.toml` files.
   `.svx` is always a **code view** — it is not in `isMarkdown`, so it never gets
   the Rendered/Raw toggle and nothing is ever compiled.
+- **Header controls**: `Copy raw` is shown for every open non-binary file,
+  including an empty text file. It copies the loaded `file.content` string
+  directly, independent of rendered/raw state, highlighting, line numbers,
+  marks, or popups. The async Clipboard API is preferred; when it is absent
+  (notably plain-HTTP LAN/Tailscale pages), a temporary transparent textarea at
+  the viewport origin and `execCommand("copy")` provide a user-gesture fallback.
+  The fallback clones and restores every document Selection range as well as
+  focus. Each copy receives a monotonically increasing attempt token, so only
+  the latest attempt may change feedback when writes settle out of order.
+  Success briefly reads `Copied`; denial or fallback failure leaves the compact
+  `Copy failed` label in the header and puts actionable, wrapping guidance in
+  the polite status region below it until the next attempt or file selection.
+  The control stays hidden for binary files.
 - **Word wrap**: a pane-header chip toggles `data-wrap` on `#viewer`; the
   effect is pure CSS (no re-render), covering both highlighted and plain
   output plus markdown fences, since all three emit the same

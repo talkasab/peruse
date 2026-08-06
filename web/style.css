@@ -70,6 +70,17 @@ body {
 .spacer {
   flex: 1;
 }
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
 button.chip,
 a.chip {
   font: inherit;
@@ -135,9 +146,13 @@ header {
   font-size: 12px;
 }
 .root {
+  min-width: 0;
+  overflow: hidden;
   color: var(--subtext0);
   font-size: 13px;
   font-family: ui-monospace, monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .toggle {
   display: flex;
@@ -289,6 +304,7 @@ main {
 }
 #pane-header {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   padding: 6px 16px;
@@ -297,8 +313,25 @@ main {
   flex: none;
 }
 #pane-header .path {
+  min-width: 0;
+  overflow: hidden;
   font-family: ui-monospace, monospace;
   font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.copy-raw {
+  white-space: nowrap;
+}
+.copy-status:not(.sr-only) {
+  flex: none;
+  max-width: 100%;
+  padding: 6px 16px;
+  overflow-wrap: anywhere;
+  color: var(--red);
+  font-size: 12px;
+  background: var(--mantle);
+  border-bottom: 1px solid var(--surface0);
 }
 #viewer-scroll {
   flex: 1;

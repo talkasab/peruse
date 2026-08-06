@@ -244,6 +244,9 @@ Alpine.data("peruse", () => ({
   raw: false,
   wrap: false,
   wrapAvailable: false,
+  copyState: /** @type {"idle" | "copied" | "error"} */ ("idle"),
+  copyTimer: 0,
+  copyAttempt: 0,
   theme: "latte",
   loading: false,
   loadingName: "",
@@ -398,6 +401,63 @@ Alpine.data("peruse", () => ({
     const n = this.reviewable.length;
     return `${n} change${n === 1 ? "" : "s"}`;
   },
+  get copyLabel() {
+    if (this.copyState === "copied") return "Copied";
+    if (this.copyState === "error") return "Copy failed";
+    return "Copy raw";
+  },
+  get copyAnnouncement() {
+    if (this.copyState === "copied") return "Raw file contents copied";
+    if (this.copyState === "error") return "Copy failed. Allow clipboard access and try again.";
+    return "";
+  },
+
+  async copyRaw() {
+    if (!this.file || this.file.binary) return;
+    const attempt = ++this.copyAttempt;
+    clearTimeout(this.copyTimer);
+    this.copyState = "idle";
+    let copied = false;
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(this.file.content);
+        copied = true;
+      } else {
+        const active = document.activeElement;
+        const selection = document.getSelection();
+        const ranges = selection
+          ? Array.from({ length: selection.rangeCount }, (_, i) =>
+              selection.getRangeAt(i).cloneRange(),
+            )
+          : [];
+        const textarea = document.createElement("textarea");
+        textarea.value = this.file.content;
+        textarea.readOnly = true;
+        textarea.style.position = "fixed";
+        textarea.style.opacity = "0";
+        document.body.append(textarea);
+        try {
+          textarea.select();
+          copied = document.execCommand("copy");
+        } finally {
+          textarea.remove();
+          if (active instanceof HTMLElement) active.focus();
+          if (selection) {
+            selection.removeAllRanges();
+            for (const range of ranges) selection.addRange(range);
+          }
+        }
+      }
+    } catch {
+      copied = false;
+    }
+    if (attempt !== this.copyAttempt) return;
+    this.copyState = copied ? "copied" : "error";
+    if (copied)
+      this.copyTimer = window.setTimeout(() => {
+        if (attempt === this.copyAttempt) this.copyState = "idle";
+      }, 1500);
+  },
 
   /** @param {string} path @param {{preserve?: boolean}} [options] */
   async selectFile(path, { preserve = false } = {}) {
@@ -412,7 +472,12 @@ Alpine.data("peruse", () => ({
     // already left — it must drop out rather than re-render the old file and
     // write that path back to location.hash, undoing the navigation.
     const nav = preserve ? this.nav : ++this.nav;
-    if (!preserve) this.wanted = path;
+    if (!preserve) {
+      this.wanted = path;
+      this.copyAttempt++;
+      clearTimeout(this.copyTimer);
+      this.copyState = "idle";
+    }
     const superseded = () => nav !== this.nav || (preserve && this.wanted !== path);
     this.loadingName = path.split("/").pop() ?? "";
     if (!preserve) this.loading = true;

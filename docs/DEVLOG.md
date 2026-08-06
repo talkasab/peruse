@@ -81,6 +81,64 @@ this is the engineering story.)
   targets clean; `bun run test` passed 144/144 with 428 assertions; and
   `bun run test:e2e` passed 35/35 with 395 assertions (1/19 in the isolated
   switcher process and 34/376 in the main process).
+
+## 2026-08-06 — Copy exact raw file contents (#19)
+
+- Added a keyboard-focusable `Copy raw` pane-header chip for every non-binary
+  file, including empty text. It copies the loaded `file.content` string rather
+  than extracting rendered DOM text, so Markdown rendering, syntax markup,
+  line numbers, change marks, and open popups cannot enter the payload; the
+  Rendered/Raw state is untouched.
+- Secure contexts use `navigator.clipboard.writeText()`. When that API is
+  absent on plain-HTTP LAN/Tailscale pages, the click gesture drives a temporary
+  textarea plus `execCommand("copy")`; the textarea is removed and focus is
+  restored. A denied API call does not silently fall through or alter the view:
+  the chip and polite status region tell the user to allow clipboard access.
+- The first focused regression was red against the static header: it expected
+  one `.copy-raw` control and found none (0 passed, 1 failed; 2 assertions
+  reached).
+- With clipboard permission granted, Chromium read back the rendered Markdown
+  fixture exactly (57 UTF-16 code units / 60 UTF-8 bytes, including `café`, 🚀,
+  a literal tab, newlines, and terminal newline), the code fixture exactly (50
+  code units / 60 UTF-8 bytes, including Japanese text, a tab, newlines, and
+  terminal newline), and the empty fixture as `""`. The Markdown view stayed
+  rendered. `Copied` appeared and returned to `Copy raw` after the 1.5 s
+  feedback interval.
+- With `navigator.clipboard` removed to model plain HTTP, the real
+  `execCommand("copy")` returned true and Chromium read back the exact code
+  fixture; the temporary textarea count returned to zero and focus returned to
+  the button. A fresh context with clipboard permission omitted reported
+  `prompt`, rejected the write, showed `Copy failed — allow clipboard` plus its
+  live-region guidance, and left Markdown rendered. The binary fixture hid the
+  button.
+- Final gates: `bun run check` checked 37 files with both typecheck targets
+  clean; `bun run test` passed 144/144 with 424 assertions; and
+  `bun run test:e2e` passed 37/37 with 401 assertions (1/1 in the isolated
+  switcher process and 36/400 in the main process).
+
+### 2026-08-06 addendum — independent-review hardening
+
+- Three focused regressions reproduced the review findings against the first
+  implementation. A delayed denied write settling after a newer success changed
+  `Copied` back to the failure label (0 passed, 1 failed; 2 assertions reached).
+  The textarea fallback cleared a rendered-text Selection (0/1; 3 assertions),
+  and the denied state at a real 500 px viewport widened the document to 565 px
+  (0/1; 4 assertions).
+- Copy attempts now carry an increasing token; a completion may update feedback
+  only while its token is current. The compatibility textarea clones all
+  Selection ranges before focusing itself and restores those ranges after it is
+  removed, alongside the existing focus restoration.
+- Failure feedback keeps the pane-header button at `Copy failed` and exposes the
+  actionable sentence in a wrapping live status below the header. Pane controls
+  wrap at narrow widths, and shrinkable path labels prevent header text from
+  forcing document overflow. Chromium measured a 500 px document in a 500 px
+  viewport, a 220/220 px pane-header client/scroll width, and the rightmost
+  control at 385.5 px inside the pane's 500 px right edge.
+- Final review-round gates: `bun run check` checked 37 files and both TypeScript
+  projects; `bun run test` passed 144/144 with 424 assertions; and
+  `bun run test:e2e` passed 39/39 with 413 assertions (1/1 in the isolated
+  switcher process and 38/412 across the other three browser files).
+
 ## 2026-08-06 — Every Markdown change gets a reachable mark (#24)
 
 - Reproduced the collapse with one fixture containing seven separated edits
