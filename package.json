@@ -1,6 +1,6 @@
 {
   "name": "@talkasab/peruse",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Lightweight local directory viewer: markdown, syntax highlighting, git-aware inline hunk diffs, live updates",
   "license": "MIT",
   "type": "module",
