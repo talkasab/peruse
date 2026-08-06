@@ -11,6 +11,8 @@ date and becomes the GitHub release notes (see
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-08-06
+
 ### Fixed
 - A broken symlink that points *through* a file (for example
   `dist/bundle.js/index.js`) no longer stops a project from loading. Such a
@@ -95,4 +97,5 @@ date and becomes the GitHub release notes (see
   helpers), integration (server + git + SSE contracts over HTTP), and core
   Playwright E2E journeys, with regression tests tagged to past incidents
 
-[Unreleased]: https://github.com/talkasab/peruse/commits/main
+[Unreleased]: https://github.com/talkasab/peruse/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/talkasab/peruse/releases/tag/v1.0.0
