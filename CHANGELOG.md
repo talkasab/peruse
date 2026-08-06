@@ -11,6 +11,8 @@ date and becomes the GitHub release notes (see
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-08-06
+
 ### Fixed
 - Rendered Markdown now gives every change a distinct, clickable mark when
   several edits share one paragraph, list item, or code block—even when the
@@ -104,5 +106,6 @@ date and becomes the GitHub release notes (see
   helpers), integration (server + git + SSE contracts over HTTP), and core
   Playwright E2E journeys, with regression tests tagged to past incidents
 
-[Unreleased]: https://github.com/talkasab/peruse/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/talkasab/peruse/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/talkasab/peruse/releases/tag/v1.0.1
 [1.0.0]: https://github.com/talkasab/peruse/releases/tag/v1.0.0
