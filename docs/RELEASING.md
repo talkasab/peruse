@@ -5,12 +5,27 @@ Versioning: [SemVer](https://semver.org/). Changelog:
 continuously — every user-facing change lands with an entry under
 `[Unreleased]` in [CHANGELOG.md](../CHANGELOG.md).
 
+## Branch model
+
+This is the two-branch core of [Gitflow](https://nvie.com/posts/a-successful-git-branching-model/)
+(our `dev` = Gitflow's `develop`): day-to-day work lands on `dev`, feature
+worktrees branch from and merge back to it quickly, and `main` holds the
+tagged release history, advancing only at release time. We deliberately skip
+full Gitflow's `release/*` stabilization branches (and the long-lived feature
+branches that earned Gitflow its legacy reputation versus trunk-based
+development) — worktree branches here live hours and merge verified. If a
+released bug ever needs a fix that can't ride `dev`'s current state, use
+Gitflow's remaining piece: branch a hotfix from `main`, tag from it, and
+merge it back to both `main` and `dev`.
+
 ## Cutting a release
 
-1. Roll the changelog: rename `[Unreleased]` to `[X.Y.Z] - YYYY-MM-DD`,
-   add a fresh empty `[Unreleased]` above it, update the link references.
+1. On `dev`: roll the changelog — rename `[Unreleased]` to
+   `[X.Y.Z] - YYYY-MM-DD`, add a fresh empty `[Unreleased]` above it, update
+   the link references.
 2. `npm version X.Y.Z` (updates package.json, commits, tags `vX.Y.Z`).
-3. `git push --follow-tags`.
+3. Fast-forward `main` to `dev` and push everything:
+   `git checkout main && git merge --ff-only dev && git push origin main dev --follow-tags && git checkout dev`.
 4. The tag triggers `.github/workflows/release.yml`:
    - quality gates (`bun run check`, `bun run test`; the browser suite runs
      locally before tagging, not in CI — see issue #29);
