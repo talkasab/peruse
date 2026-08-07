@@ -71,6 +71,48 @@ describe("smoke", () => {
         await landing.waitForSelector(".project-card");
         expect(await landing.locator(".project-name").innerText()).toBe(srv.project.name);
         expect(await landing.locator(".project-summary").innerText()).toContain("change");
+        const reported = await landing.evaluate(() =>
+          fetch("/api/projects")
+            .then((response) => response.json())
+            .then((listing) => listing.version),
+        );
+        expect(await landing.locator(".landing-version").innerText()).toBe(reported);
+
+        const contrastByTheme = {};
+        for (let sample = 0; sample < 2; sample++) {
+          const measured = await landing.locator(".landing-version").evaluate((version) => {
+            const channels = (color) =>
+              color
+                .match(/[\d.]+/g)
+                .slice(0, 3)
+                .map((channel) => Number(channel) / 255);
+            const luminance = (color) =>
+              channels(color)
+                .map((channel) =>
+                  channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4,
+                )
+                .reduce(
+                  (sum, channel, index) => sum + channel * [0.2126, 0.7152, 0.0722][index],
+                  0,
+                );
+            const foreground = luminance(getComputedStyle(version).color);
+            const background = luminance(getComputedStyle(document.body).backgroundColor);
+            return {
+              theme: document.documentElement.dataset.theme,
+              ratio:
+                (Math.max(foreground, background) + 0.05) /
+                (Math.min(foreground, background) + 0.05),
+            };
+          });
+          contrastByTheme[measured.theme] = measured.ratio;
+          await landing.click(".theme-btn");
+          await landing.waitForFunction(
+            (theme) => document.documentElement.dataset.theme !== theme,
+            measured.theme,
+          );
+        }
+        expect(contrastByTheme.latte).toBeGreaterThanOrEqual(4.5);
+        expect(contrastByTheme.mocha).toBeGreaterThanOrEqual(4.5);
       } finally {
         await landing.close();
       }
@@ -89,6 +131,7 @@ describe("smoke", () => {
       expect(await page.locator("#tree .row").count()).toBeGreaterThan(0);
       expect(await page.locator(".project-switcher option").count()).toBe(1);
       expect(await page.locator(".project-switcher").inputValue()).toBe(srv.project.name);
+      expect(await page.locator(".brand").getAttribute("title")).toBe(srv.version);
     },
     T,
   );

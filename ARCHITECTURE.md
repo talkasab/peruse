@@ -51,7 +51,8 @@ DOMPurify, Alpine.js, @catppuccin/palette) are devDependencies bundled into
   localhost is an explicit opt-in.
 - The CLI never opens a browser (owner decision 2026-08-05): peruse's home
   use case is remote — the machine running the server is not the machine
-  running the browser. It prints clickable URLs and nothing else.
+  running the browser. Its startup summary prints the resolved peruse version
+  once alongside the clickable URLs.
 
 ## Server (`server/index.js`)
 
@@ -68,12 +69,25 @@ nor directory), but direct paths through them serve normally.
 | Endpoint | Returns |
 |---|---|
 | `GET /` + assets | landing/client bundle from `dist/` (auto-rebuilt at startup if any file recursively below `web/` is newer — checkout runs only) |
-| `GET /api/projects` | server `os.hostname()`, plus registered projects and live worktrees with missing state, last-opened time, and brief branch/change summary |
+| `GET /api/projects` | server `os.hostname()` and cached running peruse version, plus registered projects and live worktrees with missing state, last-opened time, and brief branch/change summary |
 | `GET /p/<name>/` | project viewer client; opening it updates the registered parent's `lastOpened`; an unavailable route returns a minimal hostname-titled HTML 404 |
 | `GET /p/<name>/api/tree` | nested JSON tree plus local branch state; per-file git status letter; gitignored flags; per-dir `dirty` flag; ignored dirs listed but not walked; ≤500 entries per dir |
 | `GET /p/<name>/api/file?path=` | text content, size, binary flag, status, hunks |
 | `GET /p/<name>/raw/<path>` | raw bytes, correct MIME (images, markdown assets) |
 | `GET /p/<name>/api/events` | project-scoped SSE change stream |
+
+The running version is resolved exactly once during `startServer()`, after any
+checkout client rebuild, and retained in the server closure. Peruse's package
+root is the parent of the directory containing `server/index.js`; that is the
+same relationship in a source checkout and in the npm layout (`bin/`, `server/`,
+`dist/`, and `package.json`). It never depends on `process.cwd()`, a registered
+project, or a served directory. Without `.git` at that package root the value is
+`v<package.json version>`. A checkout uses bounded, no-optional-lock Git calls
+against that root: `git log -1 --format=%ct` supplies the clean UTC timestamp;
+when porcelain status reports modified or untracked paths, the timestamp is the
+newest existing path mtime maxed with the commit time and gains `-dirty`.
+Checkout values are `v<version>-dev.<YYYYMMDDHHMMSS>[-dirty]`; a failed checkout
+Git query falls back to `v<version> (dev)`. Requests only read the cached value.
 
 Worktrees are discovered with `git worktree list --porcelain` whenever the
 project model is requested or a route is resolved. They are grouped under
@@ -287,6 +301,11 @@ once, removes stale switcher state, and recomputes the landing title without
 navigating away from the already-rendered content; repeated 404 reconnects do
 not create a refetch loop.
 
+The same `/api/projects` model supplies the running version. The landing page
+shows it as muted monospace metadata after the project list. On project pages
+the brand link exposes it through `title` only; version text never enters the
+hostname/project document-title contract.
+
 - **Tree**: VS Code explorer conventions — uniform 24 px rows, rotating
   chevrons (only on expandable dirs), folder/file SVG-mask icons, indent
   guides, status letters (M yellow, A/U green, D red, R teal — the
@@ -484,7 +503,8 @@ they guard.
   parsing, web/lib.js helpers, rendered HTML sanitization and compatibility,
   mdsvex grammar — per-region token colours measured under both themes) +
   **integration** (`test/integration/`: real server + real git over HTTP —
-  encoded multi-root routes, landing data, tree/file/raw contracts, enumeration
+  encoded multi-root routes, landing data, source-root version resolution,
+  tree/file/raw contracts, enumeration
   and total Git spawns for a realistic navigation counted through patched
   `Bun.spawn`, cached target identity/missing state, SSE coalescing and gitignore-skip,
   idle-connection survival, port fallback, tiny-watch-budget survival,

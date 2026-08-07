@@ -12,7 +12,7 @@
 </head>
 <body x-data="peruse" x-cloak>
   <header>
-    <a class="brand" href="/">peruse</a>
+    <a class="brand" href="/" :title="projectName ? version : null">peruse</a>
     <select class="project-switcher" x-show="projectName"
             @change="switchProject($event.target.value)" aria-label="Switch project">
       <template x-for="project in registeredProjects" :key="project.routeName">
@@ -72,6 +72,7 @@
         No projects yet. Run <code>peruse &lt;path&gt;</code> or <code>peruse add &lt;path&gt;</code>.
       </div>
     </div>
+    <div class="landing-version" x-show="version" x-text="version"></div>
   </section>
 
   <main x-show="projectName">

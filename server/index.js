@@ -75,7 +75,12 @@ import {
  * @property {number} [enumerationTtlMs]
  */
 
-const PKG = join(dirname(fileURLToPath(import.meta.url)), "..");
+/** Resolve peruse's package root from the server module in checkouts and npm installs. */
+export function packageRootFrom(serverModuleUrl = import.meta.url) {
+  return resolve(dirname(fileURLToPath(serverModuleUrl)), "..");
+}
+
+const PKG = packageRootFrom();
 const DIST = join(PKG, "dist");
 const SERVER_HOSTNAME = hostname();
 const PROJECT_NOT_FOUND_HTML = `<!doctype html>
@@ -144,6 +149,47 @@ async function git(root, ...args) {
         (code === 143 ? " (killed by 30 s timeout)" : ""),
     );
   return { code, out };
+}
+
+/** Resolve once at startup; never inspect a served project for peruse's version. */
+export async function resolveRunningVersion(packageRoot = PKG) {
+  const pkg = /** @type {{version: string}} */ (
+    await Bun.file(join(packageRoot, "package.json")).json()
+  );
+  const release = `v${pkg.version}`;
+  if (!existsSync(join(packageRoot, ".git"))) return release;
+  try {
+    const head = await git(packageRoot, "log", "-1", "--format=%ct");
+    const headSeconds = Number(head.out.trim());
+    if (head.code !== 0 || !Number.isFinite(headSeconds)) return `${release} (dev)`;
+    const status = await git(
+      packageRoot,
+      "status",
+      "--porcelain=v1",
+      "-z",
+      "--untracked-files=all",
+    );
+    if (status.code !== 0) return `${release} (dev)`;
+    let newestSeconds = headSeconds;
+    let dirty = false;
+    const entries = status.out.split("\0");
+    for (let i = 0; i < entries.length; i++) {
+      const entry = entries[i];
+      if (!entry) continue;
+      dirty = true;
+      const state = entry.slice(0, 2);
+      const path = entry.slice(3);
+      const file = lstatSync(join(packageRoot, path), { throwIfNoEntry: false });
+      if (file) newestSeconds = Math.max(newestSeconds, Math.floor(file.mtimeMs / 1000));
+      if (state.includes("R") || state.includes("C")) i++;
+    }
+    const stamp = new Date(newestSeconds * 1000)
+      .toISOString()
+      .replaceAll(/[-:T]/g, "")
+      .slice(0, 14);
+    return `${release}-dev.${stamp}${dirty ? "-dirty" : ""}`;
+  } catch {}
+  return `${release} (dev)`;
 }
 
 /** @param {string} root @returns {Promise<{isRepo: boolean, prefix: string}>} */
@@ -859,6 +905,7 @@ export async function startServer({
   enumerationTtlMs,
 }) {
   ensureFreshClient();
+  const runningVersion = await resolveRunningVersion();
   const initialProjects =
     fixedProjects ??
     (root
@@ -1030,7 +1077,11 @@ export async function startServer({
         const { pathname } = url;
 
         if (pathname === "/api/projects")
-          return json({ hostname: SERVER_HOSTNAME, projects: await projectListing() });
+          return json({
+            hostname: SERVER_HOSTNAME,
+            version: runningVersion,
+            projects: await projectListing(),
+          });
 
         const match = pathname.match(/^\/p\/([^/]+)(\/.*)?$/);
         if (match) {
@@ -1194,12 +1245,12 @@ export async function startServer({
     }
     return stopPromise;
   };
-  return { port: server.port, host, stop };
+  return { port: server.port, host, version: runningVersion, stop };
 }
 
 // Dev convenience: `bun run server/index.js [path]` serves without the CLI wrapper.
 if (import.meta.main) {
   const root = resolve(process.argv[2] ?? ".");
-  const { port } = await startServer({ root, port: 7440, host: "127.0.0.1" });
-  console.log(`peruse (dev) — serving ${root}\n  → http://127.0.0.1:${port}/p/project/`);
+  const { port, version } = await startServer({ root, port: 7440, host: "127.0.0.1" });
+  console.log(`peruse ${version} — serving ${root}\n  → http://127.0.0.1:${port}/p/project/`);
 }

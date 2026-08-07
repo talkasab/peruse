@@ -322,6 +322,14 @@ main {
   border-radius: 10px;
   padding: 24px;
 }
+.landing-version {
+  max-width: 980px;
+  margin-top: 18px;
+  color: var(--subtext1);
+  font:
+    11px ui-monospace,
+    monospace;
+}
 @media (max-width: 760px) {
   .project-primary,
   .worktree-row {

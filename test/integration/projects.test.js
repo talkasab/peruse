@@ -45,6 +45,8 @@ describe("multi-root HTTP routing", () => {
     expect(html).toContain('class="project-card"');
     const listing = await (await fetch(`${origin}/api/projects`)).json();
     expect(listing.hostname).toBe(hostname());
+    expect(listing.version).toMatch(/^v\S+/);
+    expect(listing.version).toBe(server.version);
     const online = listing.projects.find((project) => project.name === named.name);
     const missing = listing.projects.find((project) => project.name === "Offline disk");
     expect(online).toMatchObject({ missing: false, kind: "project" });

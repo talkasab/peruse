@@ -256,6 +256,7 @@ Alpine.data("peruse", () => ({
   wanted: /** @type {string | null} */ (null),
   projects: /** @type {ProjectView[]} */ ([]),
   hostname: "",
+  version: "",
   projectName,
   requestedProject: projectName,
 
@@ -321,11 +322,12 @@ Alpine.data("peruse", () => ({
     return `/p/${encodeURIComponent(routeName)}/`;
   },
   async refreshProjects() {
-    const listing = /** @type {{hostname: string, projects: ProjectView[]}} */ (
+    const listing = /** @type {{hostname: string, version: string, projects: ProjectView[]}} */ (
       await (await fetch("/api/projects")).json()
     );
     this.projects = listing.projects;
     this.hostname = listing.hostname;
+    this.version = listing.version;
     this.updateTitle(this.projectName);
   },
   /** @param {string | null} routeName */

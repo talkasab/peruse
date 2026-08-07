@@ -4,6 +4,54 @@ Narrative record of work sessions — what changed, what we learned, and why.
 Newest first. (The [CHANGELOG](../CHANGELOG.md) is the user-facing summary;
 this is the engineering story.)
 
+## 2026-08-06 — Running version across server surfaces (#35)
+
+- Added one startup-time version resolver rooted at the parent of
+  `server/index.js`, which is the package root in both checkouts and npm's
+  `bin/ server/ dist/ package.json` layout. It never consults `process.cwd()` or
+  any served project. `/api/projects` returns the cached value beside hostname;
+  the landing page renders it as quiet metadata, project pages put it only in
+  the brand hover title, and CLI startup includes it once before the URLs.
+- Released layouts without `.git` use `v<package version>`. Clean checkouts use
+  the HEAD commit epoch from `git log -1 --format=%ct`, formatted as compact UTC.
+  Dirty checkouts parse NUL-delimited porcelain status, take the newest lstat
+  mtime among existing modified/untracked paths maxed with HEAD, and append
+  `-dirty`. Both Git calls share the existing 30 s, no-optional-lock wrapper;
+  failure falls back to `v<version> (dev)`.
+- The payload regression was red before implementation: `listing.version` was
+  `undefined` instead of a `v…` string (0 passed, 1 failed; 4 assertions
+  reached). Deterministic fixtures measured `v9.8.7-dev.20260806200000` for a
+  clean checkout, `v9.8.7-dev.20260806210144-dirty` after an older modified file
+  plus a newer untracked file, `v4.5.6` for a packaged layout, and
+  `v7.8.9 (dev)` for failed checkout Git resolution.
+- An independent startup probe observed exactly two version Git subprocesses
+  (`log` and `status`) across three `/api/projects` requests, all returning
+  `v1.0.1-dev.20260806205659-dirty`. The 11 px landing value sat 18 px below the
+  last card versus 46/28 px headings at 1280/320 px, with document width equal
+  to each viewport. Project `document.title` remained hostname/project-only;
+  CLI printed the same version once.
+- Final verification: `bun run check` checked 40 files and both TypeScript
+  projects; `bun run test` passed 151 tests with 447 assertions across 20
+  files; `bun run test:e2e` passed 46 Chromium tests with 495 assertions across
+  five files and the required three isolated Bun invocations.
+
+### 2026-08-06 addendum — design pivot and contrast review fix
+
+- The issue initially called for checkout versions based on `git describe`
+  and a SHA. The owner changed that design during implementation because a UTC
+  timestamp makes build staleness directly comparable across machines. Raw
+  source mtimes cannot supply a clean-checkout timestamp—a fresh clone rewrites
+  them—so clean builds use the HEAD commit time, while dirty builds max that
+  stable baseline with the mtimes of Git-reported modified and untracked files.
+- Independent review found the landing version's original `--overlay0` color
+  measured only 2.30:1 in Latte and 3.36:1 in Mocha. It now uses the still-muted
+  `--subtext1`, measured from rendered Chromium colors at 5.53:1 and 9.26:1;
+  the landing e2e computes WCAG contrast in both themes and requires 4.5:1.
+- Review-fix verification: `bun run check` checked 40 files and both TypeScript
+  projects; `bun run test` passed 151 tests with 447 assertions across 20
+  files; `bun run test:e2e` passed 46 Chromium tests with 497 assertions across
+  five files and the required three isolated Bun invocations.
+
 ## 2026-08-06 (integration) — Second wave merged: #33, #9, #19, #15
 
 - Merged smallest-first (#33 → #9 → #19 → #15), each branch rebased onto the

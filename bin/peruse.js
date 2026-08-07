@@ -156,6 +156,6 @@ if (host === "0.0.0.0" || host === "::") {
 const destination = selected ? `/p/${encodeURIComponent(selected.name)}/` : "/";
 const destinationUrls = urls.map((url) => `${url}${destination}`);
 console.log(
-  `peruse — serving ${readProjects(configFile).length} project(s)\n` +
+  `peruse ${started.version} — serving ${readProjects(configFile).length} project(s)\n` +
     destinationUrls.map((url) => `  → ${url}`).join("\n"),
 );

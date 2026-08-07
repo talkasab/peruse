@@ -16,6 +16,8 @@ date and becomes the GitHub release notes (see
   pane when the full popup fits there, avoiding unnecessary scrolling (#9)
 
 ### Added
+- The landing page, project-brand hover text, and CLI startup output now show
+  the running release version or timestamped checkout build (#35)
 - Browser tabs now identify the server machine and selected project or
   parent-qualified worktree route, staying accurate through rapid switches and
   project removal (#33)
