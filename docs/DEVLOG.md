@@ -52,6 +52,17 @@ this is the engineering story.)
   files; `bun run test:e2e` passed 46 Chromium tests with 497 assertions across
   five files and the required three isolated Bun invocations.
 
+## 2026-08-07 — 1.1.0 released, first zero-touch publish
+
+- `@talkasab/peruse@1.1.0` published entirely by the tag-triggered workflow:
+  OIDC trusted publishing with signed provenance in the Sigstore transparency
+  log, GitHub Release notes from the changelog section, no manual steps. The
+  release carries the second wave (#33, #9, #19, #15) plus the version
+  indicator (#35) and the latent switcher-race fix surfaced by #33's review.
+- The 1.0.1 release preceding it was delayed ~10 hours by a GitHub Actions
+  major outage; the tag-triggered design meant recovery was one `gh run
+  rerun` with the idempotent publish guard making every retry safe.
+
 ## 2026-08-06 (integration) — Second wave merged: #33, #9, #19, #15
 
 - Merged smallest-first (#33 → #9 → #19 → #15), each branch rebased onto the
