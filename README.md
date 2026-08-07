@@ -5,8 +5,10 @@ directory tree on the left, beautifully rendered file on the right.
 
 - **GOOD markdown rendering** — GitHub-flavored, with code fences highlighted
   exactly like standalone code files
-- **GOOD code rendering** — Shiki (VS Code–quality TextMate highlighting)
-- **Git-aware** — status marks in the tree, with a filter for changed/new files
+- **GOOD code rendering** — Shiki (VS Code–quality TextMate highlighting),
+  including mdsvex `.svx` source files
+- **Git-aware** — status marks in the tree with a changed-only filter, plus
+  the current branch and its ahead/behind state in the header
 - **Inline hunk diffs** — subtle gutter marks show *where* a file changed;
   click one to expand that individual hunk's diff in place. Never a
   whole-page diff view.
@@ -14,6 +16,9 @@ directory tree on the left, beautifully rendered file on the right.
   change on disk
 - **Catppuccin** — Latte (light) and Mocha (dark), following your system
   preference with a manual toggle
+- **Built for reading and review** — word wrap for long lines, one-click
+  copy of a file's exact source, browser tabs titled by server and project,
+  and a version indicator that distinguishes releases from dev checkouts
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the system as implemented,
 [CHANGELOG.md](CHANGELOG.md) for release history, and

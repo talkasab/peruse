@@ -42,6 +42,15 @@ implemented** and is the source of truth.
 - When a bug report contradicts your model, reproduce under the reported
   conditions before theorizing (the fd-exhaustion saga was solved by
   reading /proc fd tables under a simulated ulimit).
+- Prove every new regression test RED against the unfixed code before
+  trusting it, and have implementation and review done by different
+  agents/sessions — green suites repeatedly concealed confirmed defects
+  that independent adversarial review then found (60+ across the
+  2026-08-05..07 releases).
+- A first `bun run test:e2e` invocation can fail with a Bun/Playwright
+  pipe stall (subprocess with missing stdout, cascading shared-page
+  errors) and pass unchanged on rerun. Rerun the exact command before
+  diagnosing; evidence ledger in issue #29.
 
 ## Publishing
 

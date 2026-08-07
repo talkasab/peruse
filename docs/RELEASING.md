@@ -37,6 +37,15 @@ so the first publish is manual:
 
 Every later release is just "Cutting a release" — no manual publishing.
 
+## If the release run fails
+
+The workflow is safe to re-run any number of times: the publish step skips
+when the tagged version already exists on the registry, so a rerun can never
+double-publish or fail on "cannot publish over". For infrastructure failures
+(runner outages cancel queued jobs — the 1.0.1 release was delayed ~10 hours
+by one), just `gh run rerun <run-id>` once githubstatus.com shows Actions
+operational again. Nothing about the tag or commits needs to change.
+
 ## Distribution decisions
 
 Distribution is npm only (`bunx @talkasab/peruse` needs no install).
