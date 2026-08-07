@@ -11,6 +11,8 @@ date and becomes the GitHub release notes (see
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-08-07
+
 ### Fixed
 - Hunk diff popups now open above change marks near the bottom of the file
   pane when the full popup fits there, avoiding unnecessary scrolling (#9)
@@ -122,6 +124,7 @@ date and becomes the GitHub release notes (see
   helpers), integration (server + git + SSE contracts over HTTP), and core
   Playwright E2E journeys, with regression tests tagged to past incidents
 
-[Unreleased]: https://github.com/talkasab/peruse/compare/v1.0.1...HEAD
+[Unreleased]: https://github.com/talkasab/peruse/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/talkasab/peruse/releases/tag/v1.1.0
 [1.0.1]: https://github.com/talkasab/peruse/releases/tag/v1.0.1
 [1.0.0]: https://github.com/talkasab/peruse/releases/tag/v1.0.0
