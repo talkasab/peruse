@@ -8,9 +8,81 @@ import { createHTMLSanitizer } from "../../web/sanitize.js";
 const fixture = (name) =>
   readFileSync(join(import.meta.dir, "../fixtures/frontmatter", name), "utf8");
 const frontmatter = (name) => splitFrontmatter(fixture(name));
-const card = (fm) => JSDOM.fragment(renderFrontmatter(fm)).querySelector(".fm-card");
+const card = (fm) => JSDOM.fragment(renderFrontmatter(fm).card).querySelector(".fm-card");
+const allMarkup = (fm) => Object.values(renderFrontmatter(fm)).join("");
 
 describe("structured YAML frontmatter", () => {
+  test("top-level lists of maps move to ordered footers with per-key source ranges", () => {
+    const fm = frontmatter("imaging-problem-list.md");
+    const rendered = renderFrontmatter(fm);
+    const header = JSDOM.fragment(rendered.card);
+    const footers = JSDOM.fragment(rendered.footers);
+    const rows = [...header.querySelectorAll(".fm-card > tbody > tr")];
+    expect(rows).toHaveLength(7);
+    expect(rows.map((row) => row.getAttribute("data-lines"))).toEqual([
+      "2-2",
+      "3-3",
+      "4-4",
+      "5-5",
+      "6-6",
+      "7-7",
+      "8-8",
+    ]);
+    expect(header.querySelectorAll(".fm-nested-table")).toHaveLength(0);
+    const jump = rows.at(-1).querySelector(".fm-jump");
+    expect(jump.getAttribute("href")).toBe("#fm-sources");
+    expect(jump.textContent).toBe("9 sources ↓");
+    const footer = footers.querySelector(".fm-footer");
+    expect(footer.id).toBe("fm-sources");
+    expect(footer.getAttribute("data-lines")).toBe("8-35");
+    expect(footer.querySelectorAll(".fm-nested-table tbody tr")).toHaveLength(9);
+
+    const generic = splitFrontmatter(
+      "---\ntitle: Generic\nevidence:\n  - id: first\n  - id: second\nreferences:\n  - url: https://example.test/\n---\n",
+    );
+    const genericRendered = renderFrontmatter(generic);
+    const genericFooters = JSDOM.fragment(genericRendered.footers);
+    expect([...genericFooters.querySelectorAll(".fm-footer")].map((item) => item.id)).toEqual([
+      "fm-evidence",
+      "fm-references",
+    ]);
+    expect(genericRendered.card).toContain('href="#fm-evidence"');
+    expect(genericRendered.card).toContain('href="#fm-references"');
+
+    const hostile = splitFrontmatter('---\n"<img src=x onerror=alert(1)>":\n  - id: safe\n---\n');
+    const hostileMarkup = allMarkup(hostile);
+    const hostileDOM = JSDOM.fragment(hostileMarkup);
+    expect(hostileDOM.querySelectorAll("img")).toHaveLength(0);
+    expect(hostileDOM.querySelector(".fm-footer-title").textContent).toBe(
+      "<img src=x onerror=alert(1)>",
+    );
+    expect(hostileDOM.querySelector(".fm-jump").getAttribute("href")).toBe(
+      `#fm-${encodeURIComponent("<img src=x onerror=alert(1)>")}`,
+    );
+  });
+
+  test("invalid YAML keeps the line card and produces no footer", () => {
+    const rendered = renderFrontmatter(frontmatter("invalid-yaml.md"));
+    expect(rendered.footers).toBe("");
+    const fallback = JSDOM.fragment(rendered.card).querySelector(".fm-card");
+    expect(fallback.getAttribute("data-lines")).toBe("1-4");
+    expect(fallback.querySelectorAll(":scope > tbody > tr")).toHaveLength(2);
+  });
+
+  test("one-item lists use a singular count and aliases share one footer", () => {
+    const fm = splitFrontmatter(
+      "---\nsources: &source_list\n  - id: only\nderived: *source_list\n---\n",
+    );
+    const rendered = renderFrontmatter(fm);
+    const cardDOM = JSDOM.fragment(rendered.card);
+    const footerDOM = JSDOM.fragment(rendered.footers);
+    const jumps = [...cardDOM.querySelectorAll(".fm-jump")];
+    expect(jumps.map((jump) => jump.textContent)).toEqual(["1 source ↓", "1 derived ↓"]);
+    expect(jumps.map((jump) => jump.getAttribute("href"))).toEqual(["#fm-sources", "#fm-sources"]);
+    expect(footerDOM.querySelectorAll(".fm-footer")).toHaveLength(1);
+    expect(footerDOM.querySelectorAll(".fm-nested-table tbody tr")).toHaveLength(1);
+  });
+
   test("OKF sample parses maps and lists and renders seven rows, four chips, nine sources", () => {
     const fm = frontmatter("imaging-problem-list.md");
     const data = parseFrontmatter(fm.source).data;
@@ -31,14 +103,16 @@ describe("structured YAML frontmatter", () => {
     const element = card(fm);
     expect(element.querySelectorAll(":scope > tbody > tr")).toHaveLength(7);
     expect(element.querySelectorAll(".fm-chip")).toHaveLength(4);
-    expect(element.querySelectorAll(".fm-nested-table tbody tr")).toHaveLength(9);
+    expect(element.querySelectorAll(".fm-nested-table tbody tr")).toHaveLength(0);
+    const footer = JSDOM.fragment(renderFrontmatter(fm).footers);
+    expect(footer.querySelectorAll(".fm-nested-table tbody tr")).toHaveLength(9);
     expect(
-      [...element.querySelectorAll(".fm-nested-table thead th")].map((th) => th.textContent),
+      [...footer.querySelectorAll(".fm-nested-table thead th")].map((th) => th.textContent),
     ).toEqual(["id", "resource", "title"]);
     expect(element.querySelectorAll(".fm-subcard tr")).toHaveLength(2);
     expect(element.querySelectorAll(".fm-raw")).toHaveLength(0);
-    expect(element.querySelectorAll('.fm-nested-table a[href^="https://"]')).toHaveLength(9);
-    expect(element.getAttribute("data-lines")).toBe(`1-${fm.lines}`);
+    expect(footer.querySelectorAll('.fm-nested-table a[href^="https://"]')).toHaveLength(9);
+    expect(element.getAttribute("data-lines")).toBeNull();
     expect(fm.body.split("\n")).toHaveLength(fixture("imaging-problem-list.md").split("\n").length);
   });
 
@@ -60,7 +134,7 @@ describe("structured YAML frontmatter", () => {
 
   test("list-of-map columns come from every item without filling missing keys", () => {
     const fm = splitFrontmatter("---\nsources:\n  - id: first\n  - constructor: second\n---\n");
-    const table = card(fm).querySelector(".fm-nested-table");
+    const table = JSDOM.fragment(renderFrontmatter(fm).footers).querySelector(".fm-nested-table");
     expect([...table.querySelectorAll("thead th")].map((cell) => cell.textContent)).toEqual([
       "id",
       "constructor",
@@ -112,7 +186,7 @@ describe("structured YAML frontmatter", () => {
     const payload = "<img src=x onerror=alert(1)>";
     const escaped = "&lt;img src=x onerror=alert(1)&gt;";
     const fm = frontmatter("hostile.md");
-    const rendered = renderFrontmatter(fm);
+    const rendered = allMarkup(fm);
     expect(rendered).toContain(`<th>${escaped}</th><td>${escaped}</td>`);
     expect(rendered).toContain(`<span class="fm-chip">${escaped}</span>`);
     expect(rendered).toContain(`<th>${escaped}</th><th>id</th>`);
@@ -129,9 +203,9 @@ describe("structured YAML frontmatter", () => {
   });
 
   test("only HTTP(S) scalars become links and quoted hrefs stay in one attribute", () => {
-    const rendered = renderFrontmatter(frontmatter("hostile.md"));
+    const rendered = allMarkup(frontmatter("hostile.md"));
     expect(rendered).toContain('href="https://example.test/a&quot;b\'c"');
-    const links = [...JSDOM.fragment(rendered).querySelectorAll("a[href]")];
+    const links = [...JSDOM.fragment(rendered).querySelectorAll('a[href^="http"]')];
     expect(links.map((link) => link.getAttribute("href"))).toEqual([
       "https://example.test/a\"b'c",
       "http://example.test/ok",
@@ -144,7 +218,7 @@ describe("structured YAML frontmatter", () => {
   test("a very long scalar stays escaped and readable", () => {
     const long = "x".repeat(5000);
     const fm = splitFrontmatter(`---\nlong: ${long}<img src=x onerror=alert(1)>\n---\n`);
-    const rendered = renderFrontmatter(fm);
+    const rendered = allMarkup(fm);
     expect(rendered).toContain(`${long}&lt;img src=x onerror=alert(1)&gt;`);
     expect(JSDOM.fragment(rendered).querySelectorAll("img")).toHaveLength(0);
     expect(card(fm).querySelector("td").textContent).toBe(`${long}<img src=x onerror=alert(1)>`);

@@ -12,12 +12,18 @@ date and becomes the GitHub release notes (see
 ## [Unreleased]
 
 ### Changed
+- YAML frontmatter lists of maps now appear below the document, with count
+  links in the header card; aliases share one footer (#43)
 - YAML frontmatter now shows nested fields, tags, source tables, and clickable
   URLs as structured data instead of raw lines (#38)
 - Live updates use Bun's native file watcher. Projects with broken symlinks now
   open without a watcher stall; directory swaps and timestamp-preserving
   in-place rewrites remain live (#37)
 - Bun 1.4.0 or newer is required (#37)
+
+### Fixed
+- In-page Markdown links, including footnotes, now scroll within the open
+  file without changing the selected file (#43)
 
 ### Removed
 - The chokidar runtime dependency and `PERUSE_WATCH_BUDGET` setting (#37)

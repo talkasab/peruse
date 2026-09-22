@@ -4,6 +4,49 @@ Narrative record of work sessions — what changed, what we learned, and why.
 Newest first. (The [CHANGELOG](../CHANGELOG.md) is the user-facing summary;
 this is the engineering story.)
 
+## 2026-09-22 — Frontmatter footers and in-page links (#43)
+
+- The review round reproduced a footer-ID collision in Chromium: a heading
+  named `fm sources` took the jump, leaving the footer 1,826.75 px below a
+  719 px pane. The focused test failed twice before the fix. Footer jumps now
+  look up footer sections first; ordinary heading links retain their own
+  targets. A heading jump now lands 8 px below the pane top instead of about
+  63 px, and a one-item `sources` list reads `1 source`. Shared YAML aliases
+  link to one footer instead of rendering duplicate tables.
+- The review also found that a closing-fence deletion can tie between a
+  footer and the following body heading. ARCHITECTURE now records the existing
+  first-rendered-block tie rule. Cross-file links still drop their fragments;
+  that follow-up is recorded on issue #40.
+- The OKF fixture's nine-row `sources` table pushed the document body below
+  the first viewport. Any top-level list of maps now moves to a footer after
+  the body, and its header row becomes a count link. The seven-row card keeps
+  its four tag chips; the footer retains all nine source links.
+- `yaml` node ranges map ordinary header rows to their source lines. A moved
+  list maps its header row to the key line and its footer to the full list
+  range, so the two sibling elements cannot claim the same source-item hunk.
+  A changed title marks only its row, and a changed source item marks only
+  the footer. Browser geometry caught a 24.25 px rail offset on table rows:
+  their `offsetParent` is the table, so the rail now measures bounding boxes
+  against `#viewer`.
+- Fragment links now scroll targets within the viewer with space for the
+  sticky heading. They leave the file-selection hash intact and reset
+  horizontal scroll, which a narrow-pane check found could otherwise leave
+  the footer entirely outside the visible pane. Chromium checks the sources
+  jump, a footnote link and its sticky-heading clearance, and its
+  back-reference. The first RED
+  unit run found no split footer or invalid-YAML footer result; Chromium
+  found one inline table and no footer mark target before implementation.
+- The jump link and footer table use Catppuccin variables. The minimum sampled
+  text contrast is 5.14:1 in Latte and 8.69:1 in Mocha.
+- The full browser suite caught a popup from a short frontmatter row covering
+  the next change mark. Markdown popups now start to the right of the rail;
+  every mark remains clickable. The switcher fixture also waits up to 8
+  seconds for the title after its rapid-switch window instead of assuming
+  `/api/projects` has settled by then (issue #42).
+- Final verification passed `bun run check` (42 Biome files and both
+  TypeScript projects), `bun run test` (163 tests, 532 assertions), and
+  `bun run test:e2e` (52 tests, 578 assertions across three Bun processes).
+
 ## 2026-09-22 — Native filesystem watcher (#37)
 
 - Replaced chokidar with Bun 1.4's recursive `fs.watch`. Bun registers one
