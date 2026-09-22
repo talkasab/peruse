@@ -554,14 +554,15 @@ Alpine.data("peruse", () => ({
     // The stripped lines are replaced with blanks so markdown-it's source
     // line maps (data-lines) stay aligned with the file's real line numbers.
     let body = f.content,
-      fmCard = "";
+      fmCard = "",
+      fmFooters = "";
     const fm = splitFrontmatter(f.content);
     if (fm) {
-      fmCard = renderFrontmatter(fm);
+      ({ card: fmCard, footers: fmFooters } = renderFrontmatter(fm));
       body = fm.body;
     }
     v.innerHTML = sanitizeHTML(
-      `<article class="markdown-body">${fmCard}${md.render(body)}</article>`,
+      `<article class="markdown-body">${fmCard}${md.render(body)}${fmFooters}</article>`,
     );
     this.wrapAvailable = !!v.querySelector(".markdown-body .shiki .line");
     // Wrap each h1/h2 section in a <section> so a pinned heading is sticky
@@ -575,6 +576,8 @@ Alpine.data("peruse", () => ({
         sec = document.createElement("section");
         article.insertBefore(sec, node);
         sec.appendChild(node);
+      } else if (node instanceof Element && node.classList.contains("fm-footer")) {
+        sec = null;
       } else if (sec) sec.appendChild(node);
     }
     for (const element of v.querySelectorAll("img[src]")) {
@@ -649,18 +652,21 @@ Alpine.data("peruse", () => ({
   },
 
   // Overlay bars beside each marked block, all on one fixed gutter x.
-  // offsetTop resolves against #viewer (the nearest positioned ancestor),
-  // so nesting depth is irrelevant.
+  // Measure against #viewer: table rows use their table as offsetParent.
   layoutRails() {
     const v = this.$refs.viewer;
     for (const r of v.querySelectorAll(".rail-mark")) r.remove();
     const article = /** @type {HTMLElement | null} */ (v.querySelector(".markdown-body"));
     if (!article) return;
     const railX = article.offsetLeft + 10;
+    const viewerTop = v.getBoundingClientRect().top;
     const blocks = [...v.querySelectorAll(".md-changed")].map((element) => {
       const block = /** @type {HTMLElement} */ (element);
+      const box = block.getBoundingClientRect();
       return {
         block,
+        top: box.top - viewerTop,
+        height: box.height,
         indices: (block.dataset.hunks ?? "").split(",").filter(Boolean).map(Number),
         approximate: new Set(
           (block.dataset.approxHunks ?? "").split(",").filter(Boolean).map(Number),
@@ -668,16 +674,14 @@ Alpine.data("peruse", () => ({
       };
     });
     const entries = blocks
-      .flatMap(({ block, indices, approximate }) =>
+      .flatMap(({ block, top, height, indices, approximate }) =>
         indices.map((i, position) => ({
           block,
           i,
           approximate: approximate.has(i),
           naturalTop:
-            indices.length === 1
-              ? block.offsetTop
-              : block.offsetTop + position * (MULTI_MARK_HEIGHT + MULTI_MARK_GAP),
-          height: indices.length === 1 ? block.offsetHeight : MULTI_MARK_HEIGHT,
+            indices.length === 1 ? top : top + position * (MULTI_MARK_HEIGHT + MULTI_MARK_GAP),
+          height: indices.length === 1 ? height : MULTI_MARK_HEIGHT,
         })),
       )
       .sort((a, z) => a.i - z.i);
@@ -771,7 +775,11 @@ Alpine.data("peruse", () => ({
   /** @param {HTMLElement} popup @param {HTMLElement} anchor @param {HTMLElement} verticalAnchor */
   positionPanel(popup, anchor, verticalAnchor) {
     const isLine = anchor.classList.contains("line");
-    popup.style.left = `${anchor.offsetLeft + (isLine ? this.codeGutterPx(anchor) : 0)}px`;
+    const viewer = this.$refs.viewer;
+    const railX =
+      /** @type {HTMLElement | null} */ (viewer.querySelector(".markdown-body"))?.offsetLeft ?? 0;
+    const anchorLeft = anchor.getBoundingClientRect().left - viewer.getBoundingClientRect().left;
+    popup.style.left = `${isLine ? anchor.offsetLeft + this.codeGutterPx(anchor) : Math.max(anchorLeft, railX + 22)}px`;
     const anchorTop = verticalAnchor.offsetTop;
     const anchorBottom = anchorTop + verticalAnchor.offsetHeight;
     const popupHeight = popup.offsetHeight;
@@ -964,7 +972,37 @@ Alpine.data("peruse", () => ({
   /** @param {MouseEvent} e @param {HTMLAnchorElement} a */
   interceptLink(e, a) {
     const href = a.getAttribute("href");
-    if (!href || /^([a-z][a-z0-9+.-]*:|\/\/|#)/i.test(href)) return false;
+    if (!href) return false;
+    if (href.startsWith("#")) {
+      e.preventDefault();
+      const rawId = href.slice(1);
+      /** @param {string} id */
+      const findTarget = (id) =>
+        (a.classList.contains("fm-jump")
+          ? [...this.$refs.viewer.querySelectorAll(".fm-footer")].find((footer) => footer.id === id)
+          : null) ?? document.getElementById(id);
+      let target = findTarget(rawId);
+      if (!target) {
+        try {
+          target = findTarget(decodeURIComponent(rawId));
+        } catch {
+          return true;
+        }
+      }
+      if (target && this.$refs.viewer.contains(target)) {
+        const scroll = this.$refs.scroll;
+        const heading = target
+          .closest(".markdown-body > section")
+          ?.querySelector(":scope > h1, :scope > h2");
+        const offset =
+          (heading && heading !== target ? heading.getBoundingClientRect().height : 0) + 8;
+        scroll.scrollTop +=
+          target.getBoundingClientRect().top - scroll.getBoundingClientRect().top - offset;
+        scroll.scrollLeft = 0;
+      }
+      return true;
+    }
+    if (/^([a-z][a-z0-9+.-]*:|\/\/)/i.test(href)) return false;
     e.preventDefault();
     if (!this.file) return false;
     const dir = this.file.path.split("/").slice(0, -1).join("/");

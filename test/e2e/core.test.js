@@ -116,7 +116,136 @@ describe("smoke", () => {
 
 describe("structured YAML frontmatter", () => {
   test(
-    "OKF card has measured rows, chips, sources, links, and readable colors in both themes",
+    "footer jump reaches its footer when a body heading has the same id",
+    async () => {
+      const path = "docs/colliding-footer.md";
+      await openFile(path);
+      const footer = page.locator(".fm-footer#fm-sources");
+      expect(await page.locator("#fm-sources").count()).toBe(2);
+      await page.locator('.fm-jump[href="#fm-sources"]').click();
+      expect(await page.evaluate(() => location.hash)).toBe(`#/${path}`);
+      const position = await footer.evaluate((element) => {
+        const pane = document.querySelector("#viewer-scroll").getBoundingClientRect();
+        return {
+          top: element.getBoundingClientRect().top - pane.top,
+          height: pane.height,
+        };
+      });
+      expect(position.top).toBeGreaterThanOrEqual(0);
+      expect(position.top).toBeLessThan(position.height);
+    },
+    T,
+  );
+
+  test(
+    "a heading jump positions the heading at the top of the viewer",
+    async () => {
+      const path = "docs/colliding-footer.md";
+      await openFile(path);
+      await page.locator('.markdown-body a[href="#later-heading"]').click();
+      expect(await page.evaluate(() => location.hash)).toBe(`#/${path}`);
+      const top = await page.locator("h2#later-heading").evaluate((element) => {
+        const pane = document.querySelector("#viewer-scroll").getBoundingClientRect();
+        return element.getBoundingClientRect().top - pane.top;
+      });
+      expect(top).toBeGreaterThanOrEqual(0);
+      expect(top).toBeLessThanOrEqual(12);
+    },
+    T,
+  );
+
+  test(
+    "sources jump and footnotes scroll inside the viewer without changing the file route",
+    async () => {
+      const path = "docs/imaging-problem-list.md";
+      await openFile(path);
+      const route = `#/${path}`;
+      const card = page.locator(".fm-card");
+      expect(await card.locator(".fm-nested-table").count()).toBe(0);
+      const jump = card.locator('.fm-jump[href="#fm-sources"]');
+      expect(await jump.innerText()).toBe("9 sources ↓");
+      const footer = page.locator(".markdown-body > .fm-footer#fm-sources");
+      expect(await footer.locator(".fm-nested-table tbody tr").count()).toBe(9);
+      expect(
+        await footer.evaluate((element) => element === element.parentElement.lastElementChild),
+      ).toBe(true);
+      await jump.click();
+      expect(await page.evaluate(() => location.hash)).toBe(route);
+      const footerPosition = await footer.evaluate((element) => {
+        const pane = document.querySelector("#viewer-scroll").getBoundingClientRect();
+        const box = element.getBoundingClientRect();
+        return { top: box.top - pane.top, bottom: box.bottom - pane.top, height: pane.height };
+      });
+      expect(footerPosition.top).toBeGreaterThanOrEqual(0);
+      expect(footerPosition.top).toBeLessThan(footerPosition.height);
+
+      await page.locator('.footnote-ref a[href="#fn1"]').first().click();
+      expect(await page.evaluate(() => location.hash)).toBe(route);
+      expect(await page.locator("#fn1").isVisible()).toBe(true);
+      const footnotePosition = await page.locator("#fn1").evaluate((element) => {
+        const pane = document.querySelector("#viewer-scroll").getBoundingClientRect();
+        const heading = element
+          .closest(".markdown-body > section")
+          ?.querySelector(":scope > h1, :scope > h2");
+        return {
+          targetTop: element.getBoundingClientRect().top - pane.top,
+          headingBottom: (heading?.getBoundingClientRect().bottom ?? pane.top) - pane.top,
+        };
+      });
+      expect(footnotePosition.targetTop).toBeGreaterThanOrEqual(footnotePosition.headingBottom - 1);
+      await page.locator('#fn1 .footnote-backref[href="#fnref1"]').first().click();
+      expect(await page.evaluate(() => location.hash)).toBe(route);
+      expect(await page.locator("#fnref1").isVisible()).toBe(true);
+      await page.setViewportSize({ width: 390, height: 800 });
+      try {
+        await jump.click();
+        expect(await page.locator("#viewer-scroll").evaluate((element) => element.scrollLeft)).toBe(
+          0,
+        );
+        expect(await page.evaluate(() => location.hash)).toBe(route);
+      } finally {
+        await page.setViewportSize({ width: 1280, height: 800 });
+      }
+    },
+    T,
+  );
+
+  test(
+    "a source hunk marks only the footer and a title hunk marks only its row",
+    async () => {
+      const path = "docs/changed-frontmatter.md";
+      await openFile(path);
+      const hunks = await page.evaluate(async (filePath) => {
+        const response = await fetch(`api/file?path=${encodeURIComponent(filePath)}`);
+        return (await response.json()).hunks;
+      }, path);
+      const titleIndex = hunks.findIndex((hunk) => hunk.newStart === 3);
+      const sourceIndex = hunks.findIndex((hunk) => hunk.newStart === 33);
+      expect(titleIndex).toBeGreaterThanOrEqual(0);
+      expect(sourceIndex).toBeGreaterThanOrEqual(0);
+      const footer = page.locator(".fm-footer#fm-sources");
+      const title = page.locator('.fm-card > tbody > tr[data-lines="3-3"]');
+      expect(await footer.count()).toBe(1);
+      expect(await footer.getAttribute("data-hunks")).toBe(String(sourceIndex));
+      expect(await title.getAttribute("data-hunks")).toBe(String(titleIndex));
+      expect(await page.locator(`.rail-mark[data-hunk="${sourceIndex}"]`).count()).toBe(1);
+      expect(await page.locator(`.rail-mark[data-hunk="${titleIndex}"]`).count()).toBe(1);
+      expect(await page.locator(`.fm-card[data-hunks="${sourceIndex}"]`).count()).toBe(0);
+      for (const [owner, index] of [
+        [title, titleIndex],
+        [footer, sourceIndex],
+      ]) {
+        const block = await owner.boundingBox();
+        const mark = await page.locator(`.rail-mark[data-hunk="${index}"]`).boundingBox();
+        expect(Math.abs(mark.y - block.y)).toBeLessThanOrEqual(1);
+        expect(Math.abs(mark.height - block.height)).toBeLessThanOrEqual(1);
+      }
+    },
+    T,
+  );
+
+  test(
+    "OKF card and footer have measured rows, chips, links, and readable colors in both themes",
     async () => {
       await openFile("docs/imaging-problem-list.md");
       const card = page.locator(".fm-card");
@@ -125,16 +254,18 @@ describe("structured YAML frontmatter", () => {
       expect(await card.locator(":scope > tbody > tr").count()).toBe(7);
       expect(await card.locator(".fm-chip").count()).toBe(4);
       expect(await card.locator(".fm-subcard tr").count()).toBe(2);
-      expect(await card.locator(".fm-nested-table tbody tr").count()).toBe(9);
+      expect(await card.locator(".fm-nested-table tbody tr").count()).toBe(0);
       expect(await card.locator(".fm-raw").count()).toBe(0);
-      const links = card.locator(".fm-nested-table a[href]");
+      const footer = page.locator(".fm-footer#fm-sources");
+      expect(await footer.locator(".fm-nested-table tbody tr").count()).toBe(9);
+      const links = footer.locator(".fm-nested-table a[href]");
       expect(await links.count()).toBe(9);
       expect(await links.first().getAttribute("href")).toBe(
         "https://github.com/openimagingdata/imaging-problem-list/blob/06f64a7893b444b761dc069ed86140a081195eac/README.md",
       );
       expect(await links.first().getAttribute("target")).toBe("_blank");
       expect(await links.first().getAttribute("rel")).toContain("noopener");
-      const sourceRowBackgrounds = await card
+      const sourceRowBackgrounds = await footer
         .locator(".fm-nested-table tbody tr")
         .evaluateAll((rows) =>
           rows.slice(0, 2).map((row) => getComputedStyle(row.querySelector("td")).backgroundColor),
@@ -142,22 +273,24 @@ describe("structured YAML frontmatter", () => {
       expect(sourceRowBackgrounds[0]).not.toBe(sourceRowBackgrounds[1]);
 
       const contrastByTheme = {};
-      const selectors = [
-        ":scope > tbody > tr > th",
-        ":scope > tbody > tr > td",
-        ".fm-chip",
-        ".fm-subcard th",
-        ".fm-subcard td",
-        ".fm-nested-table thead th",
-        ".fm-nested-table tbody td",
-        ".fm-nested-table tbody tr:nth-child(2n) td",
-        ".fm-nested-table a",
+      const samples = [
+        [card, ":scope > tbody > tr > th"],
+        [card, ":scope > tbody > tr > td"],
+        [card, ".fm-chip"],
+        [card, ".fm-subcard th"],
+        [card, ".fm-subcard td"],
+        [card, ".fm-jump"],
+        [footer, ".fm-footer-title"],
+        [footer, ".fm-nested-table thead th"],
+        [footer, ".fm-nested-table tbody td"],
+        [footer, ".fm-nested-table tbody tr:nth-child(2n) td"],
+        [footer, ".fm-nested-table a"],
       ];
       for (let sample = 0; sample < 2; sample++) {
         const theme = await page.evaluate(() => document.documentElement.dataset.theme);
         const ratios = {};
-        for (const selector of selectors) {
-          const measured = await card.locator(selector).first().evaluate(measureContrast);
+        for (const [scope, selector] of samples) {
+          const measured = await scope.locator(selector).first().evaluate(measureContrast);
           ratios[selector] = measured.ratio;
           expect(measured.ratio).toBeGreaterThanOrEqual(4.5);
         }
@@ -188,7 +321,7 @@ describe("structured YAML frontmatter", () => {
           .first()
           .evaluate((element) => getComputedStyle(element).whiteSpace),
       ).toBe("pre-wrap");
-      const links = card.locator("a[href]");
+      const links = card.locator('a[href^="http"]');
       expect(await links.count()).toBe(2);
       expect(
         await links.evaluateAll((items) => items.map((item) => item.getAttribute("href"))),
@@ -651,7 +784,7 @@ describe("markdown review journey", () => {
         const hunks = (selector) =>
           document.querySelector(selector)?.getAttribute("data-hunks")?.split(",") ?? [];
         return {
-          frontmatter: hunks(".fm-card"),
+          frontmatter: hunks(".fm-card > tbody > tr.md-changed"),
           heading: hunks(".markdown-body h1"),
           paragraph: hunks(".markdown-body p"),
           listItem: hunks(".markdown-body li"),

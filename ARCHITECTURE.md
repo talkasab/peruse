@@ -282,12 +282,21 @@ hostname/project document-title contract.
   and YAML null displays as an em dash. HTTP(S) scalar values become external
   links, with sentence-final punctuation outside the link. Invalid YAML,
   multiple documents, and non-map roots retain the old per-line card. The
-  `yaml` package is bundled with the client. Stripped frontmatter lines are
-  replaced with blanks so `data-lines` stays true to file lines. The entire
-  card has one source range;
-  frontmatter hunks each retain a rail mark, but all attach to the card rather
-  than to individual rows. Relative links open in-app (tree follows);
-  relative images rewrite to `/raw/`; external links get `target=_blank`.
+  `yaml` package is bundled with the client. Each top-level list of maps
+  renders as a footer section after the Markdown body, in source order; its
+  header row links to the footer and shows the item count. Aliases of the same
+  list link to its first footer instead of repeating the table. Other values stay
+  in the card. Stripped frontmatter lines are replaced with blanks so
+  `data-lines` stays true to file lines. Parsed rows carry ranges derived
+  from YAML node offsets; a moved list's header row maps to its key line,
+  while its footer maps to the full key and value range. The invalid-YAML
+  fallback keeps one card-wide range. Relative links open in-app (tree
+  follows); fragment links scroll within `#viewer-scroll`, clear the sticky
+  heading unless the heading itself is the target, reset horizontal scroll,
+  and leave the file route in `location.hash` unchanged. Footer jumps resolve
+  against footer sections first, so a body heading with the same ID cannot
+  intercept them. Relative
+  images rewrite to `/raw/`; external links get `target=_blank`.
   Rendered HTML passes through DOMPurify before DOM insertion; raw HTML
   remains supported, while active content and Alpine directives (`x-*`,
   `@*`, `:*`) are removed. The sanitizer preserves common README HTML,
@@ -382,8 +391,8 @@ hostname/project document-title contract.
     line's full visual height; the deletion wedge remains a single indicator
     anchored to its first row.
   - Markdown: a fixed change rail left of **all** content — one overlay bar
-    per change, JS-measured from its rendered block (`offsetTop`/`offsetHeight`
-    against the positioned `#viewer`), one x at any nesting depth, re-laid on
+    per change, JS-measured from its rendered block's bounding box against
+    the positioned `#viewer`, one x at any nesting depth, re-laid on
     resize via ResizeObserver. A block owns a list of changes; the
     **innermost** intersecting block wins independently for each change. A
     hunk is owned once, by the innermost block containing its first changed
@@ -400,10 +409,15 @@ hostname/project document-title contract.
     “these changes occur in this block, in this order”—it deliberately does
     not claim proportional visual-line coverage, because Markdown source lines
     can collapse together or wrap to radically different heights.
-    Frontmatter cards carry their source range. A change with no rendered
+    Parsed frontmatter rows and moved footers carry their source ranges, so
+    title changes mark the title row and source-item changes mark the footer.
+    A change with no rendered
     output uses the nearest source-mapped block, so no counted change is left
     without an anchor; its hollow dashed mark distinguishes that placement as
-    approximate rather than accusing the visible block itself.
+    approximate rather than accusing the visible block itself. On equal
+    distances, the first rendered block wins; a deletion anchored at the
+    closing frontmatter fence can therefore attach to the following body
+    heading instead of a footer.
   - Wholly-new files (status U/A) get **no** in-file marks — the status
     badge already says it all.
   - Click a mark → that change's diff in a **popup** anchored at the mark
@@ -417,7 +431,9 @@ hostname/project document-title contract.
     selected mark and at least the popup header visible. Split/unified changes
     remeasure and may change orientation; pane/content resize keeps the popup
     open and repositions it, while word-wrap changes close it before reflow.
-    Popups are dismissed by re-click, ✕, Esc, or click-outside. Pure additions
+    Markdown popups start to the right of the fixed rail, so a popup from a
+    short frontmatter row cannot cover the next rail mark. Popups are dismissed
+    by re-click, ✕, Esc, or click-outside. Pure additions
     get marks but **no popup** (the content is already visible).
   - Header chip `‹ N changes ›` counts and steps through every reachable
     modified/deleted change; the count and complete navigation cycle are the
@@ -481,8 +497,8 @@ they guard.
   `branch-state.test.js` runs alone; each owns a fixture, server, and Chromium
   instance. `core.test.js`, `navigation.test.js`, and `sanitize.test.js` share
   the third process. Core carries nine Chromium journeys — smoke, structured
-  frontmatter (card counts, hostile input, source links, and both-theme
-  contrast), code review
+  frontmatter (card and footer counts, jump and footnote links, per-key marks,
+  hostile input, source links, and both-theme contrast), code review
   (exact marks, popup scope, Copy raw), popup orientation (measured above/below
   gaps for code and Markdown, neither-fits fallback, navigation, split-height
   changes, and resize), markdown review (rail single-x measurement, innermost

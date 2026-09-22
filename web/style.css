@@ -777,7 +777,7 @@ main {
 .markdown-body .task-list-item-checkbox {
   margin-left: -1.4em;
 }
-/* YAML frontmatter card */
+/* YAML frontmatter card and moved list-of-map sections */
 table.fm-card {
   display: table;
   width: auto;
@@ -790,6 +790,18 @@ table.fm-card {
   border-radius: 8px;
   overflow: hidden;
   font-size: 12.5px;
+}
+.fm-footer {
+  margin-top: 32px;
+  padding-top: 14px;
+  border-top: 1px solid var(--surface1);
+  font-size: 12.5px;
+}
+.markdown-body .fm-footer-title {
+  margin: 0 0 10px;
+  color: var(--subtext1);
+  font-size: 13px;
+  font-weight: 600;
 }
 .fm-card th,
 .fm-card td {
@@ -824,13 +836,13 @@ table.fm-card {
 .fm-card .fm-null {
   color: var(--subtext1);
 }
-.fm-card .fm-paragraph,
-.fm-card .fm-list,
-.fm-card .fm-subcard,
-.fm-card .fm-nested-table {
+:is(.fm-card, .fm-footer) .fm-paragraph,
+:is(.fm-card, .fm-footer) .fm-list,
+:is(.fm-card, .fm-footer) .fm-subcard,
+:is(.fm-card, .fm-footer) .fm-nested-table {
   margin: 0;
 }
-.fm-card .fm-paragraph {
+:is(.fm-card, .fm-footer) .fm-paragraph {
   white-space: pre-wrap;
 }
 .fm-card .fm-chips {
@@ -847,11 +859,11 @@ table.fm-card {
   color: var(--text);
   white-space: nowrap;
 }
-.fm-card .fm-list {
+:is(.fm-card, .fm-footer) .fm-list {
   padding-left: 1.4em;
 }
-.fm-card .fm-subcard,
-.fm-card .fm-nested-table {
+:is(.fm-card, .fm-footer) .fm-subcard,
+:is(.fm-card, .fm-footer) .fm-nested-table {
   display: table;
   width: 100%;
   border-collapse: collapse;
@@ -860,28 +872,28 @@ table.fm-card {
 .fm-card .fm-subcard {
   border-left: 2px solid var(--surface2);
 }
-.fm-card .fm-subcard th,
-.fm-card .fm-subcard td,
-.fm-card .fm-nested-table th,
-.fm-card .fm-nested-table td {
+:is(.fm-card, .fm-footer) .fm-subcard th,
+:is(.fm-card, .fm-footer) .fm-subcard td,
+:is(.fm-card, .fm-footer) .fm-nested-table th,
+:is(.fm-card, .fm-footer) .fm-nested-table td {
   border: 1px solid var(--surface1);
   padding: 4px 8px;
 }
-.fm-card .fm-nested-table thead th {
+:is(.fm-card, .fm-footer) .fm-nested-table thead th {
   background: var(--surface0);
   color: var(--text);
 }
-.fm-card .fm-table-scroll {
+:is(.fm-card, .fm-footer) .fm-table-scroll {
   max-width: min(70vw, 880px);
   overflow-x: auto;
 }
-.fm-card .fm-nested-table td {
+:is(.fm-card, .fm-footer) .fm-nested-table td {
   overflow-wrap: anywhere;
 }
-.fm-card .fm-nested-table tbody tr:nth-child(2n) td {
+:is(.fm-card, .fm-footer) .fm-nested-table tbody tr:nth-child(2n) td {
   background: var(--surface0);
 }
-.fm-card a {
+:is(.fm-card, .fm-footer) a {
   color: var(--text);
   text-decoration: underline;
   overflow-wrap: anywhere;

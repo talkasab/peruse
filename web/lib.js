@@ -122,7 +122,7 @@ export function splitFrontmatter(content) {
  * Parse one YAML mapping. Invalid, multi-document, and non-map input returns
  * null so the caller can retain splitFrontmatter's line fallback.
  * @param {string} source
- * @returns {{data: Record<string, unknown>, blockPaths: Set<string>} | null}
+ * @returns {{data: Record<string, unknown>, blockPaths: Set<string>, keyRanges: Map<string, {full: string, key: string}>} | null}
  */
 export function parseFrontmatter(source) {
   try {
@@ -130,6 +130,19 @@ export function parseFrontmatter(source) {
     if (doc.errors.length || !isMap(doc.contents)) return null;
     const data = /** @type {Record<string, unknown>} */ (doc.toJS({ maxAliasCount: 50 }));
     const blockPaths = new Set();
+    const keyRanges = new Map();
+    /** @param {number} offset */
+    const sourceLine = (offset) => 2 + (source.slice(0, offset).match(/\n/g)?.length ?? 0);
+    for (const pair of doc.contents.items) {
+      if (!isScalar(pair.key) || !pair.key.range) continue;
+      const start = pair.key.range[0];
+      const keyEnd = Math.max(start, pair.key.range[1] - 1);
+      const valueEnd = Math.max(start, (pair.value?.range?.[1] ?? pair.key.range[1]) - 1);
+      keyRanges.set(String(pair.key.value), {
+        full: `${sourceLine(start)}-${sourceLine(valueEnd)}`,
+        key: `${sourceLine(start)}-${sourceLine(keyEnd)}`,
+      });
+    }
     const activeNodes = new WeakSet();
     /** @param {unknown} node @param {(string | number)[]} path */
     const visit = (node, path) => {
@@ -150,7 +163,7 @@ export function parseFrontmatter(source) {
       activeNodes.delete(node);
     };
     visit(doc.contents, []);
-    return { data, blockPaths };
+    return { data, blockPaths, keyRanges };
   } catch {
     return null;
   }
@@ -230,24 +243,54 @@ function renderValue(value, path, blockPaths, ancestors) {
 
 /**
  * Render parsed frontmatter, or preserve the original per-line card on errors.
- * The outer card alone owns the source range for Markdown change marks.
+ * Parsed rows own their source ranges; list-of-map values also get footers.
+ * Invalid YAML keeps the original card-wide line range.
  * @param {NonNullable<ReturnType<typeof splitFrontmatter>>} fm
+ * @returns {{card: string, footers: string}}
  */
 export function renderFrontmatter(fm) {
   const parsed = parseFrontmatter(fm.source);
-  const rows = parsed
-    ? Object.entries(parsed.data)
-        .map(
-          ([key, value]) =>
-            `<tr><th>${esc(key)}</th><td>${renderValue(value, [key], parsed.blockPaths, new WeakSet())}</td></tr>`,
-        )
-        .join("")
-    : fm.rows
-        .map((row) =>
-          "raw" in row
-            ? `<tr><td colspan="2" class="fm-raw">${esc(row.raw)}</td></tr>`
-            : `<tr><th>${esc(row.key)}</th><td>${esc(row.value)}</td></tr>`,
-        )
-        .join("");
-  return `<table class="fm-card" data-lines="1-${fm.lines}"><tbody>${rows}</tbody></table>`;
+  if (!parsed) {
+    const rows = fm.rows
+      .map((row) =>
+        "raw" in row
+          ? `<tr><td colspan="2" class="fm-raw">${esc(row.raw)}</td></tr>`
+          : `<tr><th>${esc(row.key)}</th><td>${esc(row.value)}</td></tr>`,
+      )
+      .join("");
+    return {
+      card: `<table class="fm-card" data-lines="1-${fm.lines}"><tbody>${rows}</tbody></table>`,
+      footers: "",
+    };
+  }
+  /** @type {string[]} */
+  const footers = [];
+  /** @type {WeakMap<object, string>} */
+  const footerIds = new WeakMap();
+  const rows = Object.entries(parsed.data)
+    .map(([key, value]) => {
+      const isFooter = Array.isArray(value) && value.length > 0 && value.every(isRecord);
+      const range = parsed.keyRanges.get(key);
+      const existingId = isFooter ? footerIds.get(value) : undefined;
+      const id = existingId ?? `fm-${encodeURIComponent(key)}`;
+      if (isFooter && !existingId) {
+        footerIds.set(value, id);
+        footers.push(
+          `<section class="fm-footer" id="${id}" data-lines="${range?.full ?? `1-${fm.lines}`}">` +
+            `<h3 class="fm-footer-title">${esc(key)}</h3>` +
+            `${renderValue(value, [key], parsed.blockPaths, new WeakSet())}</section>`,
+        );
+      }
+      const label =
+        isFooter && value.length === 1 && /^.{3,}[^sui]s$/.test(key) ? key.slice(0, -1) : key;
+      const content = isFooter
+        ? `<a class="fm-jump" href="#${id}">${value.length} ${esc(label)} ↓</a>`
+        : renderValue(value, [key], parsed.blockPaths, new WeakSet());
+      return `<tr data-lines="${isFooter && !existingId ? (range?.key ?? `1-${fm.lines}`) : (range?.full ?? `1-${fm.lines}`)}"><th>${esc(key)}</th><td>${content}</td></tr>`;
+    })
+    .join("");
+  return {
+    card: `<table class="fm-card"><tbody>${rows}</tbody></table>`,
+    footers: footers.join(""),
+  };
 }

@@ -410,7 +410,15 @@ export function makeFixtureRepo() {
   writeFileSync(join(dir, "src/popup-position.js"), POPUP_CODE_BASE);
   writeFileSync(join(dir, "docs/guide.md"), GUIDE_BASE);
   writeFileSync(
+    join(dir, "docs/colliding-footer.md"),
+    `---\nsources:\n  - id: only\n---\n\n## fm sources\n\n[Jump to later](#later-heading)\n\n${Array.from({ length: 50 }, (_, i) => `Body paragraph ${i + 1}.`).join("\n\n")}\n\n## Later heading\n\n${Array.from({ length: 35 }, (_, i) => `Later paragraph ${i + 1}.`).join("\n\n")}\n`,
+  );
+  writeFileSync(
     join(dir, "docs/imaging-problem-list.md"),
+    readFileSync(join(import.meta.dir, "fixtures/frontmatter/imaging-problem-list.md")),
+  );
+  writeFileSync(
+    join(dir, "docs/changed-frontmatter.md"),
     readFileSync(join(import.meta.dir, "fixtures/frontmatter/imaging-problem-list.md")),
   );
   writeFileSync(
@@ -457,6 +465,10 @@ export function makeFixtureRepo() {
   writeFileSync(join(dir, "src/popup-position.js"), POPUP_CODE_EDITED); // M, 2 popup anchors
   writeFileSync(join(dir, "src/wrapped-change.js"), WRAPPED_CHANGE_EDITED); // M, one long hunk
   writeFileSync(join(dir, "docs/guide.md"), GUIDE_EDITED); // M, 3 changed blocks
+  const changedFrontmatter = readFileSync(join(dir, "docs/changed-frontmatter.md"), "utf8")
+    .replace("title: Imaging Problem List", "title: Imaging Problem List revised")
+    .replace("id: deck", "id: deck-revised");
+  writeFileSync(join(dir, "docs/changed-frontmatter.md"), changedFrontmatter);
   writeFileSync(join(dir, "docs/popup-position.md"), POPUP_MARKDOWN_EDITED); // M, 2 popup anchors
   writeFileSync(join(dir, "docs/multi-mark.md"), MULTI_MARK_EDITED); // M, 8 separated hunks
   writeFileSync(join(dir, "docs/dense-mark.md"), DENSE_MARK_EDITED); // M, 9 alternating hunks

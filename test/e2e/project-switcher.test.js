@@ -110,6 +110,10 @@ test(
         { firstRoute: alphaProject.name, finalRoute: parent.name },
       );
       await page.waitForTimeout(750);
+      // A replacement page can still have its default title here (issue #42).
+      await page.waitForFunction((title) => document.title === title, switchedTitle, {
+        timeout: 8_000,
+      });
       expect(new URL(page.url()).pathname).toBe(`/p/${encodeURIComponent(parent.name)}/`);
       expect(await page.title()).toBe(switchedTitle);
 
