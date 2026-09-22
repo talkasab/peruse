@@ -297,13 +297,27 @@ hostname/project document-title contract.
   `data-lines` stays true to file lines. Parsed rows carry ranges derived
   from YAML node offsets; a moved list's header row maps to its key line,
   while its footer maps to the full key and value range. The invalid-YAML
-  fallback keeps one card-wide range. Relative links open in-app (tree
-  follows); fragment links scroll within `#viewer-scroll`, clear the sticky
-  heading unless the heading itself is the target, reset horizontal scroll,
-  and leave the file route in `location.hash` unchanged. Footer jumps resolve
-  against footer sections first, so a body heading with the same ID cannot
-  intercept them. Relative
-  images rewrite to `/raw/`; external links get `target=_blank`.
+  fallback keeps one card-wide range. Markdown file links resolve against the
+  loaded tree at click time. Relative paths use the current file's directory;
+  root-absolute paths try the project root, then each ancestor of the current
+  file from nearest to farthest. Each candidate checks an exact file and its
+  `.md` form before a directory. Query strings are excluded from lookup;
+  fragments still scroll after rendering. `/` opens the project-root index,
+  then the outermost content-root index, or the tree root when neither exists.
+  Unresolved targets keep the former relative-path behavior. Because ignored
+  directory descendants are absent from the loaded tree, links into those
+  directories also use that fallback (#10). A link to
+  a directory opens its `index.md`, then `README.md` if no index exists, while
+  selecting and expanding that folder in the tree. A folder without either
+  file is selected and expanded while the current document stays visible.
+  Same-file fragments scroll within `#viewer-scroll`, clear the sticky heading
+  unless the heading itself is the target, reset horizontal scroll, and leave
+  the file route in `location.hash` unchanged. Cross-file fragments scroll
+  after the target document renders. Footer jumps resolve against footer
+  sections first, so a body heading with the same ID cannot intercept them.
+  Local images use the same tree resolver and `/raw/` endpoint; external links
+  get `target=_blank`. Wikilinks and name-based `shortest` resolution are not
+  supported.
   Rendered HTML passes through DOMPurify before DOM insertion; raw HTML
   remains supported, while active content and Alpine directives (`x-*`,
   `@*`, `:*`) are removed. The sanitizer preserves common README HTML,

@@ -71,6 +71,92 @@ export function resolveRel(dir, rel) {
   return parts.join("/");
 }
 
+/** @param {string} href */
+export function splitLocalHref(href) {
+  const suffixAt = href.search(/[?#]/);
+  const path = suffixAt < 0 ? href : href.slice(0, suffixAt);
+  const suffix = suffixAt < 0 ? "" : href.slice(suffixAt);
+  const hashAt = suffix.indexOf("#");
+  return { path, suffix, fragment: hashAt < 0 ? "" : suffix.slice(hashAt + 1) };
+}
+
+/**
+ * @typedef {{name: string, path: string, dir: boolean, children?: LinkTreeNode[]}} LinkTreeNode
+ */
+
+/** @param {LinkTreeNode[]} tree @param {string} path */
+function treeNode(tree, path) {
+  let nodes = tree;
+  let found;
+  for (const part of path.split("/")) {
+    found = nodes.find((node) => node.name === part);
+    if (!found) return null;
+    nodes = found.children ?? [];
+  }
+  return found ?? null;
+}
+
+/**
+ * Resolve a Markdown link or image against the loaded project tree.
+ * Root-absolute paths prefer the project root, then the current file's
+ * ancestors nearest first. Missing paths retain the former relative result.
+ * @param {LinkTreeNode[]} tree
+ * @param {string} currentPath
+ * @param {string} href
+ * @returns {{path: string | null, directory: string | null, fragment: string, found: boolean}}
+ */
+export function resolveLink(tree, currentPath, href) {
+  const { path: rawPath, fragment } = splitLocalHref(href);
+  let linkPath;
+  try {
+    linkPath = decodeURIComponent(rawPath);
+  } catch {
+    linkPath = rawPath;
+  }
+  const currentDir = currentPath.split("/").slice(0, -1).join("/");
+  const roots = linkPath.startsWith("/") ? [""] : [currentDir];
+  if (linkPath.startsWith("/")) {
+    for (let ancestor = currentDir; ancestor; ancestor = ancestor.split("/").slice(0, -1).join("/"))
+      roots.push(ancestor);
+  }
+  const trailingSlash = linkPath.endsWith("/");
+  const normalized = linkPath.replace(/\/+$/, "");
+  if (linkPath === "/") {
+    for (const root of ["", ...roots.slice(1).reverse()]) {
+      const children = root ? treeNode(tree, root)?.children : tree;
+      const index = ["index.md", "README.md"]
+        .map((name) => children?.find((child) => !child.dir && child.name === name))
+        .find(Boolean);
+      if (index) return { path: index.path, directory: root, fragment, found: true };
+    }
+    return { path: null, directory: "", fragment, found: true };
+  }
+  const candidates = roots.map((root) => resolveRel(root, normalized));
+  for (const path of candidates) {
+    if (!path) {
+      const index = ["index.md", "README.md"]
+        .map((name) => tree.find((child) => !child.dir && child.name === name))
+        .find(Boolean);
+      return { path: index?.path ?? null, directory: "", fragment, found: true };
+    }
+    const node = treeNode(tree, path);
+    if (node && !node.dir) return { path, directory: null, fragment, found: true };
+    if (!trailingSlash && !/\.[^/]+$/.test(path)) {
+      const markdown = `${path}.md`;
+      if (treeNode(tree, markdown)?.dir === false)
+        return { path: markdown, directory: null, fragment, found: true };
+    }
+    if (!node) continue;
+    if (node.dir) {
+      const index = ["index.md", "README.md"]
+        .map((name) => node.children?.find((child) => !child.dir && child.name === name))
+        .find(Boolean);
+      return { path: index?.path ?? null, directory: path, fragment, found: true };
+    }
+  }
+  return { path: resolveRel(currentDir, linkPath), directory: null, fragment, found: false };
+}
+
 /** @param {number} n */
 export function fmtSize(n) {
   if (n < 1024) return `${n} B`;

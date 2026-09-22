@@ -51,8 +51,9 @@ import {
   langForPath as libLangForPath,
   resolveLang as libResolveLang,
   renderFrontmatter,
-  resolveRel,
+  resolveLink,
   splitFrontmatter,
+  splitLocalHref,
 } from "./lib.js";
 import { createHTMLSanitizer } from "./sanitize.js";
 
@@ -241,6 +242,7 @@ Alpine.data("peruse", () => ({
   branchState: /** @type {BranchState | null} */ (null),
   root: "",
   open: /** @type {Set<string>} */ (new Set()),
+  selectedDirectory: /** @type {string | null} */ (null),
   changedOnly: false,
   showIgnored: true,
   file: /** @type {FileData | null} */ (null),
@@ -431,13 +433,21 @@ Alpine.data("peruse", () => ({
     if (row.truncated) return;
     if (row.dir) {
       this.open.has(row.path) ? this.open.delete(row.path) : this.open.add(row.path);
-    } else if (location.hash === `#/${row.path}`) this.onHash();
-    else location.hash = `#/${row.path}`;
+    } else {
+      this.selectedDirectory = null;
+      if (location.hash === `#/${row.path}`) this.onHash();
+      else location.hash = `#/${row.path}`;
+    }
   },
   /** @param {string} path */
   expandTo(path) {
     const parts = path.split("/").slice(0, -1);
     for (let i = 1; i <= parts.length; i++) this.open.add(parts.slice(0, i).join("/"));
+  },
+  /** @param {string} path */
+  selectDirectory(path) {
+    this.selectedDirectory = path;
+    this.expandTo(`${path}/index.md`);
   },
 
   // ---- file selection & rendering ----
@@ -514,8 +524,8 @@ Alpine.data("peruse", () => ({
       }, 1500);
   },
 
-  /** @param {string} path @param {{preserve?: boolean}} [options] */
-  async selectFile(path, { preserve = false } = {}) {
+  /** @param {string} path @param {{preserve?: boolean, directory?: string | null, fragment?: string}} [options] */
+  async selectFile(path, { preserve = false, directory = null, fragment = "" } = {}) {
     // Highlighting big files blocks the main thread for a while; show the
     // indicator and yield two frames so it actually PAINTS first (its spinner
     // is transform-animated, so the compositor keeps it moving during the
@@ -556,12 +566,14 @@ Alpine.data("peruse", () => ({
     const panels = preserve ? this.panelState() : [];
     this.file = data;
     if (!preserve) this.raw = false;
+    if (!preserve) this.selectedDirectory = directory;
     this.expandTo(path);
     if (!preserve && location.hash !== `#/${path}`) location.hash = `#/${path}`;
     this.render();
     this.loading = false;
     this.$refs.scroll.scrollTop = scroll;
     this.restorePanels(panels);
+    if (fragment) this.scrollToFragment(fragment);
   },
 
   render() {
@@ -588,7 +600,6 @@ Alpine.data("peruse", () => ({
 
   /** @param {HTMLElement} v @param {TextFile} f */
   renderMarkdown(v, f) {
-    const dir = f.path.split("/").slice(0, -1).join("/");
     // YAML frontmatter → structured card, never body text.
     // The stripped lines are replaced with blanks so markdown-it's source
     // line maps (data-lines) stay aligned with the file's real line numbers.
@@ -622,8 +633,11 @@ Alpine.data("peruse", () => ({
     for (const element of v.querySelectorAll("img[src]")) {
       const img = /** @type {HTMLImageElement} */ (element);
       const src = img.getAttribute("src");
-      if (src && !/^([a-z][a-z0-9+.-]*:|\/|#|data:)/i.test(src))
-        img.src = `${projectBase}/raw/${resolveRel(dir, src)}`;
+      if (src && !/^([a-z][a-z0-9+.-]*:|\/\/|#)/i.test(src)) {
+        const { path, suffix } = splitLocalHref(src);
+        const target = resolveLink(this.tree, f.path, path);
+        if (target.path) img.src = `${projectBase}/raw/${target.path}${suffix}`;
+      }
     }
     for (const element of v.querySelectorAll("a[href]")) {
       const a = /** @type {HTMLAnchorElement} */ (element);
@@ -1008,44 +1022,65 @@ Alpine.data("peruse", () => ({
       return this.togglePanel(+line.dataset.hunk, line, line, true);
     this.closeAllPanels(); // click anywhere else dismisses the popup
   },
+  /** @param {string} rawId @param {boolean} [preferFooter] */
+  scrollToFragment(rawId, preferFooter = false) {
+    /** @param {string} id */
+    const findTarget = (id) =>
+      (preferFooter
+        ? [...this.$refs.viewer.querySelectorAll(".fm-footer")].find((footer) => footer.id === id)
+        : null) ?? document.getElementById(id);
+    let target = findTarget(rawId);
+    if (!target) {
+      try {
+        target = findTarget(decodeURIComponent(rawId));
+      } catch {
+        return;
+      }
+    }
+    if (target && this.$refs.viewer.contains(target)) {
+      const scroll = this.$refs.scroll;
+      const heading = target
+        .closest(".markdown-body > section")
+        ?.querySelector(":scope > h1, :scope > h2");
+      const offset =
+        (heading && heading !== target ? heading.getBoundingClientRect().height : 0) + 8;
+      scroll.scrollTop +=
+        target.getBoundingClientRect().top - scroll.getBoundingClientRect().top - offset;
+      scroll.scrollLeft = 0;
+    }
+  },
   /** @param {MouseEvent} e @param {HTMLAnchorElement} a */
   interceptLink(e, a) {
     const href = a.getAttribute("href");
     if (!href) return false;
     if (href.startsWith("#")) {
       e.preventDefault();
-      const rawId = href.slice(1);
-      /** @param {string} id */
-      const findTarget = (id) =>
-        (a.classList.contains("fm-jump")
-          ? [...this.$refs.viewer.querySelectorAll(".fm-footer")].find((footer) => footer.id === id)
-          : null) ?? document.getElementById(id);
-      let target = findTarget(rawId);
-      if (!target) {
-        try {
-          target = findTarget(decodeURIComponent(rawId));
-        } catch {
-          return true;
-        }
-      }
-      if (target && this.$refs.viewer.contains(target)) {
-        const scroll = this.$refs.scroll;
-        const heading = target
-          .closest(".markdown-body > section")
-          ?.querySelector(":scope > h1, :scope > h2");
-        const offset =
-          (heading && heading !== target ? heading.getBoundingClientRect().height : 0) + 8;
-        scroll.scrollTop +=
-          target.getBoundingClientRect().top - scroll.getBoundingClientRect().top - offset;
-        scroll.scrollLeft = 0;
-      }
+      this.scrollToFragment(href.slice(1), a.classList.contains("fm-jump"));
       return true;
     }
     if (/^([a-z][a-z0-9+.-]*:|\/\/)/i.test(href)) return false;
     e.preventDefault();
     if (!this.file) return false;
-    const dir = this.file.path.split("/").slice(0, -1).join("/");
-    location.hash = `#/${resolveRel(dir, decodeURIComponent(href.split("#")[0]))}`;
+    const target = resolveLink(this.tree, this.file.path, href);
+    if (!target.found) {
+      location.hash = `#/${target.path}`;
+    } else if (target.path) {
+      void this.selectFile(target.path, {
+        directory: target.directory,
+        fragment: target.fragment,
+      });
+    } else if (target.directory !== null) {
+      if (target.directory) this.selectDirectory(target.directory);
+      else {
+        this.nav++;
+        this.file = null;
+        this.wanted = null;
+        this.loading = false;
+        this.selectedDirectory = null;
+        this.$refs.viewer.innerHTML = "";
+        location.hash = "#/";
+      }
+    }
     return true;
   },
 
