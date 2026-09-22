@@ -68,14 +68,35 @@
           </div>
         </article>
       </template>
-      <div class="landing-empty" x-show="registeredProjects.length === 0">
+      <div class="landing-empty" x-show="projectsLoadState === 'loading'" aria-live="polite">
+        Loading projects…
+      </div>
+      <template x-if="projectsLoadState === 'error'">
+        <div class="landing-empty landing-error" role="alert">
+          <p>Couldn't reach the server. Check that peruse is running, then try again.</p>
+          <button type="button" class="chip" @click="retryProjects()">Retry</button>
+        </div>
+      </template>
+      <div class="landing-empty" x-show="projectsLoadState === 'ok' && registeredProjects.length === 0">
         No projects yet. Run <code>peruse &lt;path&gt;</code> or <code>peruse add &lt;path&gt;</code>.
       </div>
     </div>
     <div class="landing-version" x-show="version" x-text="version"></div>
   </section>
 
-  <main x-show="projectName">
+  <section class="project-load-status" x-show="projectName && projectsLoadState !== 'ok'">
+    <div class="landing-empty" x-show="projectsLoadState === 'loading'" aria-live="polite">
+      Loading projects…
+    </div>
+    <template x-if="projectsLoadState === 'error'">
+      <div class="landing-empty landing-error project-load-error" role="alert">
+        <p>Couldn't reach the server. Check that peruse is running, then try again.</p>
+        <button type="button" class="chip" @click="retryProjects()">Retry</button>
+      </div>
+    </template>
+  </section>
+
+  <main x-show="projectName && projectsLoadState === 'ok'">
     <nav id="tree">
       <template x-for="row in rows" :key="row.path">
         <div class="row"

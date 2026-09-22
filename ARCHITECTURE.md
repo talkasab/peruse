@@ -230,8 +230,15 @@ obsolete runtime.
 
 Alpine.js component; no framework build. At `/`, it renders registered projects
 with path, git summary, last-opened date, dimmed missing state, and grouped live
-worktrees. At `/p/<name>/`, state is tree + flattened visible rows
-(depth-annotated), selection via `location.hash` (`#/path`), a grouped project /
+worktrees. Both landing and project routes track `/api/projects` loading
+separately from registry size. They retry an unusable response up to three
+times with backoff, then show a server connection error and a Retry button.
+The empty-library message appears only after a usable response with no
+registered projects. A project route starts its tree, handlers, and EventSource
+once the listing loads, including after a manual Retry. A parseable listing with
+the expected shape remains usable even if its HTTP status is non-2xx. The
+landing page opens no EventSource. At `/p/<name>/`, state is tree + flattened
+visible rows (depth-annotated), selection via `location.hash` (`#/path`), a grouped project /
 worktree dropdown in the header, and theme + word-wrap preference in
 `localStorage`.
 

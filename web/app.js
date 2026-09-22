@@ -256,6 +256,9 @@ Alpine.data("peruse", () => ({
   nav: 0,
   wanted: /** @type {string | null} */ (null),
   projects: /** @type {ProjectView[]} */ ([]),
+  projectsLoadState: "loading",
+  projectsLoading: false,
+  viewerStarted: false,
   hostname: "",
   version: "",
   projectName,
@@ -267,8 +270,12 @@ Alpine.data("peruse", () => ({
       (matchMedia("(prefers-color-scheme: dark)").matches ? "mocha" : "latte");
     this.applyTheme();
     this.wrap = localStorage.getItem("peruse-wrap") === "true";
-    await this.refreshProjects();
-    if (!this.projectName) return;
+    if (!(await this.loadProjectsWithRetry()) || !this.projectName) return;
+    await this.initProjectView();
+  },
+  async initProjectView() {
+    if (this.viewerStarted) return;
+    this.viewerStarted = true;
     this.$refs.viewer.addEventListener("click", (e) => this.viewerClick(e));
     // Reflow (pane resize, images loading) moves blocks: re-lay the rail and
     // remeasure an open popup against its replacement mark.
@@ -323,13 +330,45 @@ Alpine.data("peruse", () => ({
     return `/p/${encodeURIComponent(routeName)}/`;
   },
   async refreshProjects() {
+    const response = await fetch("/api/projects");
     const listing = /** @type {{hostname: string, version: string, projects: ProjectView[]}} */ (
-      await (await fetch("/api/projects")).json()
+      await response.json()
     );
+    if (
+      typeof listing?.hostname !== "string" ||
+      typeof listing.version !== "string" ||
+      !Array.isArray(listing.projects)
+    ) {
+      throw new Error(`Invalid projects response: ${response.status}`);
+    }
     this.projects = listing.projects;
     this.hostname = listing.hostname;
     this.version = listing.version;
     this.updateTitle(this.projectName);
+  },
+  async loadProjectsWithRetry() {
+    if (this.projectsLoading) return false;
+    this.projectsLoading = true;
+    this.projectsLoadState = "loading";
+    try {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          await this.refreshProjects();
+          this.projectsLoadState = "ok";
+          return true;
+        } catch {
+          if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 200 * 2 ** attempt));
+        }
+      }
+      this.projectsLoadState = "error";
+      return false;
+    } finally {
+      this.projectsLoading = false;
+    }
+  },
+  async retryProjects() {
+    const app = /** @type {typeof this} */ (Alpine.$data(document.body));
+    if ((await app.loadProjectsWithRetry()) && app.projectName) await app.initProjectView();
   },
   /** @param {string | null} routeName */
   updateTitle(routeName) {

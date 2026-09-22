@@ -22,6 +22,8 @@ date and becomes the GitHub release notes (see
 - Bun 1.4.0 or newer is required (#37)
 
 ### Fixed
+- Landing and project pages now retry failed project-list requests and offer a
+  Retry button when the server is unavailable (#44)
 - In-page Markdown links, including footnotes, now scroll within the open
   file without changing the selected file (#43)
 

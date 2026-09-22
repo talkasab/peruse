@@ -4,6 +4,34 @@ Narrative record of work sessions — what changed, what we learned, and why.
 Newest first. (The [CHANGELOG](../CHANGELOG.md) is the user-facing summary;
 this is the engineering story.)
 
+## 2026-09-22 — Landing fetch recovery (#44)
+
+- An aborted first `/api/projects` request left the landing page with an
+  uncaught fetch error and the empty-library message. An isolated Chromium
+  regression test failed before the fix because no Retry button appeared.
+- Landing and project routes now track loading, success, and failure
+  independently of the number of projects. They try the initial request three
+  times with 200 ms and 400 ms backoff, then offer Retry. A project route
+  starts its tree, handlers, and EventSource after either initial or manual
+  retry success. The landing route still opens no EventSource.
+- Browser tests cover aborted requests followed by recovery, repeated HTTP 503
+  responses, and an empty registry. The error message and Retry button meet
+  4.5:1 contrast in Latte and Mocha.
+- The review found that a project route still stopped on a failed listing fetch.
+  Three new browser tests failed before the follow-up fix: a transient abort
+  left no tree, sustained failure had no Retry button, and a valid JSON listing
+  in a 503 response never reached the tree. The shared load path now recovers on
+  both routes, accepts a valid listing regardless of HTTP status, and rejects
+  malformed listing shapes without assigning them to client state. The error
+  alert enters the DOM when needed, and duplicate programmatic retries cannot
+  start another request sequence.
+- The review's backoff-window note remains a tradeoff: three attempts cover
+  brief interruptions, and Retry remains available after they expire. No
+  restart-duration measurement supports a larger automatic request window.
+- Final verification passed `bun run check` (43 Biome files and both
+  TypeScript projects), `bun run test` (163 tests, 532 assertions), and
+  `bun run test:e2e` (59 tests, 608 assertions across three Bun processes).
+
 ## 2026-09-22 — Frontmatter footers and in-page links (#43)
 
 - The review round reproduced a footer-ID collision in Chromium: a heading
