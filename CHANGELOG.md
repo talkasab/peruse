@@ -11,6 +11,10 @@ date and becomes the GitHub release notes (see
 
 ## [Unreleased]
 
+### Added
+- Links to folders now open `index.md` or `README.md` and select the folder in
+  the tree (#36)
+
 ### Changed
 - YAML frontmatter lists of maps now appear below the document, with count
   links in the header card; aliases share one footer (#43)
@@ -22,6 +26,8 @@ date and becomes the GitHub release notes (see
 - Bun 1.4.0 or newer is required (#37)
 
 ### Fixed
+- Root-absolute, extensionless, and queried Markdown links, cross-file
+  fragments, and local images now resolve within the served content tree (#40)
 - In-page Markdown links, including footnotes, now scroll within the open
   file without changing the selected file (#43)
 

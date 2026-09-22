@@ -4,6 +4,47 @@ Narrative record of work sessions — what changed, what we learned, and why.
 Newest first. (The [CHANGELOG](../CHANGELOG.md) is the user-facing summary;
 this is the engineering story.)
 
+## 2026-09-22 — Markdown links across content roots and folders (#40, #36)
+
+- Review round: a query-bearing absolute link was RED in both unit and Chromium
+  tests. The resolver used `?v=1` as part of the file path, leaving the viewer
+  blank. A shared URL splitter now removes query and fragment text before
+  lookup; images retain their suffix, and a queried cross-file fragment scrolls
+  to its heading. Chromium verifies both file opening and scroll position.
+- Three resolver edge cases were RED in unit tests: an earlier `foo.md` lost
+  to a later `foo/` index, `/` missed the project or content-root index, and a
+  file path ending in `/` missed its file. Candidate-local file precedence,
+  root index selection, and trailing-slash normalization fix them. The root
+  falls back to the tree root when no index exists.
+- A folder-link browser test was RED because selecting its index removed the
+  file-row highlight. Folder and open-file rows now remain selected together;
+  opening another file clears the folder selection. Ignored directory children
+  are absent from the loaded tree, so their links retain the old fallback
+  behavior (#10), recorded in ARCHITECTURE.
+- The resolver uses the loaded tree to find root-absolute links at the project
+  root or an ancestor of the linking file. Relative links keep their original
+  base. A missing extension retries `.md`; a directory opens `index.md` or
+  `README.md`, selects the folder, and expands it. A folder without an index
+  stays selected while the open document remains visible. Local images use the
+  same path rule and retain query strings and SVG fragments.
+- Tests were RED first: the new resolver export was absent, and Chromium
+  could not open an absolute glossary link or a directory index. A cross-file
+  fragment landed 1,620 px below the pane top, and a root-absolute image kept
+  `/assets/diagram.svg` instead of the project raw path. The green browser
+  checks cover those paths, missing targets, both directory forms, README
+  fallback, and the indexless folder.
+- A live Chromium check served the real OKF tree both from its repository root
+  and from `knowledge/`. In both views, the Imaging Problem List glossary link
+  opened the glossary page, and the roadmap link opened its index with the
+  roadmap folder selected. The routes were respectively
+  `knowledge/glossary/imaging-problem-list.md` and
+  `knowledge/roadmap/index.md` from the repository root, and the same paths
+  without `knowledge/` from the content root. The server was stopped and its
+  isolated registry entries were removed.
+- Final verification passed `bun run check` (44 Biome files and both
+  TypeScript projects), `bun run test` (173 tests, 552 assertions), and
+  `bun run test:e2e` (59 tests, 626 assertions across three Bun processes).
+
 ## 2026-09-22 — Frontmatter footers and in-page links (#43)
 
 - The review round reproduced a footer-ID collision in Chromium: a heading
