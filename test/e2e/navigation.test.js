@@ -31,7 +31,6 @@ test(
         port: 0,
         host: "127.0.0.1",
         portFixed: true,
-        watchBudget: 100,
       });
       browser = await launchBrowser();
       const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });

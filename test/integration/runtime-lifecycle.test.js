@@ -1,8 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { watch as fsWatch, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import chokidar from "chokidar";
 import { createProjectRuntime, startServer } from "../../server/index.js";
 import { registerProject, registryPath, removeProject } from "../../server/projects.js";
 
@@ -52,7 +51,7 @@ function makeRepo() {
   return root;
 }
 
-async function startFixture(port) {
+async function startFixture(port, watchFactory = fsWatch) {
   const root = makeRepo();
   const configDir = mkdtempSync(join(tmpdir(), "peruse-runtime-lifecycle-config-"));
   const configFile = registryPath(configDir);
@@ -61,7 +60,7 @@ async function startFixture(port) {
     configFile,
     host: "127.0.0.1",
     port,
-    watchBudget: 100,
+    watchFactory,
     enumerationTtlMs: 60_000,
   });
   const base = `http://127.0.0.1:${server.port}/p/${encodeURIComponent(project.name)}`;
@@ -111,12 +110,11 @@ function delayRuntimeStatus(root) {
 }
 
 function watchCloseProbe({ delayed = false } = {}) {
-  const originalWatch = chokidar.watch;
   const entered = deferred();
   const release = deferred();
   const state = { watchers: 0, calls: 0, completed: 0 };
-  chokidar.watch = (...args) => {
-    const watcher = originalWatch(...args);
+  const watchFactory = (...args) => {
+    const watcher = fsWatch(...args);
     state.watchers++;
     const originalClose = watcher.close.bind(watcher);
     watcher.close = async () => {
@@ -129,20 +127,18 @@ function watchCloseProbe({ delayed = false } = {}) {
     return watcher;
   };
   return {
+    watchFactory,
     state,
     entered: entered.promise,
     release: release.resolve,
-    restore() {
-      chokidar.watch = originalWatch;
-    },
   };
 }
 
 describe("runtime lifecycle shutdown", () => {
   test("stop neutralizes and awaits a delayed runtime start", async () => {
-    const fixture = await startFixture(7577);
-    const start = delayRuntimeStatus(fixture.root);
     const closes = watchCloseProbe();
+    const fixture = await startFixture(7577, closes.watchFactory);
+    const start = delayRuntimeStatus(fixture.root);
     let request;
     try {
       request = fetch(`${fixture.base}/raw/README.md`).catch(() => null);
@@ -163,14 +159,13 @@ describe("runtime lifecycle shutdown", () => {
       start.release();
       closes.release();
       start.restore();
-      closes.restore();
       await fixture.cleanup();
     }
   });
 
   test("stop awaits a close already detached by invalidation", async () => {
-    const fixture = await startFixture(7578);
     const closes = watchCloseProbe({ delayed: true });
+    const fixture = await startFixture(7578, closes.watchFactory);
     let invalidation;
     try {
       expect((await fetch(`${fixture.base}/raw/README.md`)).status).toBe(200);
@@ -188,7 +183,6 @@ describe("runtime lifecycle shutdown", () => {
       expect(closes.state).toEqual({ watchers: 1, calls: 1, completed: 1 });
     } finally {
       closes.release();
-      closes.restore();
       await fixture.cleanup();
     }
   });
@@ -198,7 +192,7 @@ describe("runtime lifecycle shutdown", () => {
     const closes = watchCloseProbe({ delayed: true });
     try {
       const runtime = await within(
-        createProjectRuntime(root, 100, { path: root }),
+        createProjectRuntime(root, { path: root }, closes.watchFactory),
         "runtime creation",
       );
       await within(runtime.ready, "watcher readiness");
@@ -216,7 +210,6 @@ describe("runtime lifecycle shutdown", () => {
       expect(closes.state).toEqual({ watchers: 1, calls: 1, completed: 1 });
     } finally {
       closes.release();
-      closes.restore();
       rmSync(root, { recursive: true, force: true });
     }
   });

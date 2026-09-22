@@ -19,7 +19,6 @@ beforeAll(async () => {
     configFile,
     port: 7571,
     host: "127.0.0.1",
-    watchBudget: 100,
   });
   origin = `http://127.0.0.1:${server.port}`;
 });

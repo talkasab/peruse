@@ -35,9 +35,8 @@ describe("startup behaviors", () => {
     expect(err?.code).toBe("EADDRINUSE");
   });
 
-  test("survives symlinks in the tree and a tiny watch budget (incidents e30232f/2be1239)", async () => {
-    // budget of 2: watcher admits almost nothing — server must stay fully alive
-    const s = await startFixtureServer(makeFixtureRepo(), 7551, { budget: 2 });
+  test("survives symlinks in the tree (incident e30232f)", async () => {
+    const s = await startFixtureServer(makeFixtureRepo(), 7551);
     cleanups.push(s.cleanup);
     const { status, body } = await s.json("/api/tree");
     expect(status).toBe(200);

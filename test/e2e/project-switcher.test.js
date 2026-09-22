@@ -37,6 +37,12 @@ test(
     writeFileSync(join(beta, "README.md"), "# Beta\n");
     git(beta, "add", ".");
     git(beta, "commit", "-qm", "initial");
+    const parentBranch = Bun.spawnSync(["git", "branch", "--show-current"], {
+      cwd: beta,
+      stdout: "pipe",
+    })
+      .stdout.toString()
+      .trim();
     git(beta, "worktree", "add", "-qb", "topic", worktree);
 
     const configFile = registryPath(configDir);
@@ -51,7 +57,6 @@ test(
         port: 0,
         host: "127.0.0.1",
         portFixed: true,
-        watchBudget: 100,
       });
       browser = await launchBrowser();
       const page = await browser.newPage({ viewport: { width: 1000, height: 700 } });
@@ -135,9 +140,10 @@ test(
         `http://127.0.0.1:${server.port}/p/${encodeURIComponent(parent.name)}/`,
       );
       await page.waitForFunction(
-        () => document.querySelector(".branch-state")?.textContent === "main",
+        (branch) => document.querySelector(".branch-state")?.textContent === branch,
+        parentBranch,
       );
-      expect(await page.locator(".branch-state").innerText()).toBe("main");
+      expect(await page.locator(".branch-state").innerText()).toBe(parentBranch);
 
       await page.selectOption(".project-switcher", alphaProject.name);
       await page.waitForURL(

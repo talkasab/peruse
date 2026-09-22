@@ -32,6 +32,8 @@ cd some/directory
 bunx @talkasab/peruse .      # registers this directory and prints its project URL
 ```
 
+Requires Bun 1.4.0 or newer.
+
 ```
 peruse [path] [--port 7440] [--host 127.0.0.1]
 peruse add <path> | rm <name-or-path> | list | prune
@@ -75,7 +77,7 @@ is tracked in issue #21.)
 
 ## Design at a glance
 
-A multi-root Bun server (`Bun.serve`, one dependency: chokidar) plus a single
+A multi-root Bun server (`Bun.serve`, native `fs.watch`) plus a single
 static client that composes markdown-it, Shiki, diff2html, and Alpine.js,
 bundled at publish time with `bun build`. Watchers are created lazily for
 projects that are actually opened. The current system is described in
@@ -89,9 +91,8 @@ bun install
 bun run bin/peruse.js <path>     # the server auto-builds dist/ when web/ is newer
 ```
 
-Not yet published to npm; until then, run it from a checkout as above.
-Tuning: `PERUSE_WATCH_BUDGET=<n>` caps how many paths the file watcher takes
-on (default derives from the fd limit; the CLI auto-raises a low `ulimit -n`).
+The CLI retains its low-fd `ulimit -n` re-exec pending macOS verification of
+the native watcher.
 
 ## License
 

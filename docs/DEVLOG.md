@@ -4,6 +4,56 @@ Narrative record of work sessions — what changed, what we learned, and why.
 Newest first. (The [CHANGELOG](../CHANGELOG.md) is the user-facing summary;
 this is the engineering story.)
 
+## 2026-09-22 — Native filesystem watcher (#37)
+
+- Replaced chokidar with Bun 1.4's recursive `fs.watch`. Bun registers one
+  inotify watch per directory and shares one process-wide inotify fd on Linux.
+  The issue's Bun 1.4.2 probe saw 202 watches for 201 directories and 4,001
+  files, versus 4,203 with chokidar. Both caught 1,940 of 1,940 mixed
+  operations. On the real peruse tree, Bun installed 606 watches in 15 ms;
+  chokidar installed 8,380 in 356 ms.
+- Bun watched both siblings of an ENOTDIR symlink that left chokidar's initial
+  scan pending. It also caught a write after a directory rename swap that
+  chokidar missed. A same-inode, same-size in-place rewrite with its mtime
+  restored generated a native change event, so the deleted snapshot fallback's
+  documented blind spot no longer applies.
+- Corrected the Linux fd claim. Chokidar's per-file registrations consume
+  inotify watch descriptors inside one shared fd, not one fd per file. The
+  fd-derived watch budget governed the wrong resource on Linux; Bun's
+  recursive walk cannot cap or skip watch installation using `ignore`.
+  `ENOSPC` now logs a rate-limited message naming
+  `fs.inotify.max_user_watches`.
+- Two new regression tests failed against the chokidar implementation before
+  the swap: a poisoned-link fixture could not open SSE within its bound, and
+  the native watcher callback contract was absent. Both pass with Bun. The
+  link-finder unit tests and stall-readiness test were removed with their
+  subsystem. The remaining symlink tests exercise Bun's direct coverage.
+- Independent review found that a synchronous root subscription error bypassed
+  the emitted-error handler. A third regression test failed against both the
+  original chokidar version and the first native version. Root subscription
+  errors now log through the same rate-limited handler and leave file serving
+  available without live updates.
+- A second review found that Bun passes root-relative paths to the `ignore`
+  predicate. The first native version called `relative(root, path)` anyway, so
+  the result depended on the process working directory. Changing the contract
+  test to pass `.git/objects/abc` made it fail (`false` instead of `true`). A
+  separate-process integration test ran from an outside `node_modules/tool`
+  directory and failed with `missing root file SSE frame`. The corrected
+  predicate accepts root-relative paths; the test then received root-file,
+  nested-file, and `.git/HEAD` events.
+- The same review removed the unreachable `RuntimeClosedError` branch. Bun's
+  watch subscription completes before the runtime is returned, and request
+  resolution still checks the closed state after awaiting fulfilled readiness.
+  It also removed a stale watchdog item from `NEXT_STEPS.md`, restricted the
+  inotify-limit advice to Linux, and moved the CLI's Bun version check ahead of
+  application module imports.
+- macOS and stock-inotify-limit checks remain open in issue #37. The CLI's
+  low-fd re-exec remains pending the macOS measurement.
+- Final verification passed `bun run check`, `bun run test` (148 tests, 449
+  assertions), and `bun run test:e2e` (46 tests, 497 assertions). The browser
+  switcher fixture reads Git's initial branch name instead of assuming
+  `master`.
+
 ## 2026-09-22 — Structured YAML frontmatter (#38)
 
 - The real OKF imaging-problem-list fixture exposed the line parser's limit:

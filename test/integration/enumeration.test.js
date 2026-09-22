@@ -57,7 +57,7 @@ beforeAll(async () => {
   }
   git(repo, "worktree", "add", "-qb", "topic", join(root, "linked"));
 
-  const base = { configFile, host: "127.0.0.1", watchBudget: 100 };
+  const base = { configFile, host: "127.0.0.1" };
   cached = await startServer({ ...base, port: 7573, enumerationTtlMs: 60_000 });
   uncached = await startServer({ ...base, port: 7574, enumerationTtlMs: 0 });
   brief = await startServer({ ...base, port: 7575, enumerationTtlMs: SHORT_TTL });
@@ -193,7 +193,6 @@ describe("enumeration caching", () => {
       configFile: collisionFile,
       host: "127.0.0.1",
       port: 7576,
-      watchBudget: 100,
       enumerationTtlMs: SHORT_TTL,
     });
     const origin = `http://127.0.0.1:${collisionServer.port}`;
@@ -217,8 +216,12 @@ describe("enumeration caching", () => {
         (target) => target.path === second,
       );
       expect(reassigned.routeName).toBe(firstTarget.routeName);
+      // Native fs.watch can queue removal events before teardown closes SSE.
+      // Drain any queued frames, then require EOF from the invalidated runtime.
       const result = await Promise.race([
-        reader.read().then(({ done }) => (done ? "eof" : "data")),
+        (async () => {
+          for (;;) if ((await reader.read()).done) return "eof";
+        })(),
         Bun.sleep(1000).then(() => "timeout"),
       ]);
       expect(result).toBe("eof");
