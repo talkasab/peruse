@@ -4,6 +4,67 @@ Narrative record of work sessions — what changed, what we learned, and why.
 Newest first. (The [CHANGELOG](../CHANGELOG.md) is the user-facing summary;
 this is the engineering story.)
 
+## 2026-09-22 — Structured YAML frontmatter (#38)
+
+- The real OKF imaging-problem-list fixture exposed the line parser's limit:
+  its 36-line frontmatter became 34 card rows, including 27 raw continuation
+  lines. A new Chromium assertion measured those 34 rows against the expected
+  seven before implementation; the new unit suite failed because the parser
+  and renderer exports did not yet exist.
+- `yaml` 2.9.1 now parses one mapping document. Invalid YAML, multiple
+  documents, and non-map roots use the previous line renderer. The card shows
+  scalar rows, short-string chips, nested maps, union-column tables for
+  lists of maps, and folded/literal block text. The unchanged blank-line
+  replacement preserves Markdown line numbers, and one card still owns one
+  source range for change marks. All card HTML passes through DOMPurify.
+- The OKF card measures seven top-level rows, four tag chips, two generated
+  subrows, nine source rows, and nine resource links in Chromium. Across the
+  sampled keys, values, chips, table cells, and links, the minimum WCAG text
+  contrast was 5.14:1 in Latte and 8.69:1 in Mocha. Underlined palette text
+  replaced blue on card links after blue measured below 4.5:1 in Latte.
+- A sparse source-table regression found that `key in item` filled a missing
+  `constructor` column from `Object.prototype`. The renderer now checks own
+  keys. The switcher browser fixture also pins Git's initial branch to `main`,
+  so its assertions do not depend on a machine's Git defaults.
+- Before adding `yaml`, `dist/app.js` was 2,814,568 bytes raw and 428,374
+  bytes gzip (`gzip -9 -n`). After review fixes it is 2,916,351 raw and
+  459,419 gzip: +101,783 raw and +31,045 gzip bytes.
+- Initial verification: `bun run check` passed Biome and both TypeScript
+  projects; `bun run test:all` passed 157 unit/integration tests and 47
+  Chromium tests. The added frontmatter unit test first failed on a missing
+  parser export; the browser journey first measured 34 rows, and the sparse
+  table regression first displayed an inherited `constructor` value.
+
+### Review follow-up
+
+- Added hostile YAML fixtures and assertions for escaped keys, values, chips,
+  table headers, and block scalars; quoted HTTP(S) hrefs; rejected
+  `javascript:`, `data:`, `vbscript:`, and protocol-relative links; and a
+  5,000-character value. A Chromium case drives the hostile file through the
+  full Markdown and DOMPurify path. Temporarily replacing `return esc(display)`
+  with `return display` made the hostile unit test fail: the card emitted a
+  live `<img>` instead of escaped text. Restoring the call passed the test.
+- Literal scalars now keep indentation, aliased block scalars get paragraph
+  styling, empty collections leave no chrome, and YAML null displays as an
+  em dash. Source tables have visible zebra rows, and sentence punctuation
+  stays outside URL links. Focused tests were red for the empty, alias,
+  punctuation, indentation, and stripe cases before these fixes.
+- Re-verification found that removing the switcher wait exposed a
+  title-before-branch ordering race: a copy of `main` failed 5 of 9 runs
+  despite four earlier isolated passes. The test now retries the branch text
+  for at most 8 seconds, the fixture still pins `main`, and [issue #42](https://github.com/talkasab/peruse/issues/42)
+  tracks the client ordering.
+- The separate Latte Markdown body-link contrast gap measured 4.34:1
+  (`#1e66f5` on `#eff1f5`) and is tracked in [issue #41](https://github.com/talkasab/peruse/issues/41).
+- Final review-round verification: `bun run check` passed Biome (42 files)
+  and both TypeScript projects; `bun run test` passed 163 tests with 508
+  assertions; `bun run test:e2e` passed 48 Chromium tests with 536
+  assertions on its first run.
+- After restoring the bounded switcher assertion, `bun run test:e2e` passed
+  three consecutive runs (48 tests and 536 assertions each). `bun run check`
+  passed Biome and both TypeScript projects; `bun run test` passed 163 tests
+  with 508 assertions.
+
 ## 2026-08-06 — Running version across server surfaces (#35)
 
 - Added one startup-time version resolver rooted at the parent of

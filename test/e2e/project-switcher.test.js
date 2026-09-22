@@ -31,7 +31,7 @@ test(
     mkdirSync(alpha);
     mkdirSync(beta);
     writeFileSync(join(alpha, "README.md"), "# Alpha\n");
-    git(beta, "init", "-q");
+    git(beta, "init", "-q", "-b", "main");
     git(beta, "config", "user.email", "t@e.st");
     git(beta, "config", "user.name", "Test");
     writeFileSync(join(beta, "README.md"), "# Beta\n");
@@ -114,6 +114,20 @@ test(
       await page.waitForFunction((title) => document.title === title, worktreeTitle);
       expect(await page.locator(".project-switcher").inputValue()).toBe(routeName);
       expect(await page.title()).toBe(worktreeTitle);
+      // The title can update before /api/tree fills branchState (issue #42).
+      try {
+        await page.waitForFunction(
+          (branch) => document.querySelector(".branch-state")?.textContent === branch,
+          "topic",
+          { timeout: 8_000 },
+        );
+      } catch (error) {
+        const actual = await page.locator(".branch-state").innerText();
+        throw new Error(
+          `Branch state did not become "topic" within 8 s; received ${JSON.stringify(actual)}`,
+          { cause: error },
+        );
+      }
       expect(await page.locator(".branch-state").innerText()).toBe("topic");
 
       await page.selectOption(".project-switcher", parent.name);
@@ -121,9 +135,9 @@ test(
         `http://127.0.0.1:${server.port}/p/${encodeURIComponent(parent.name)}/`,
       );
       await page.waitForFunction(
-        () => document.querySelector(".branch-state")?.textContent === "master",
+        () => document.querySelector(".branch-state")?.textContent === "main",
       );
-      expect(await page.locator(".branch-state").innerText()).toBe("master");
+      expect(await page.locator(".branch-state").innerText()).toBe("main");
 
       await page.selectOption(".project-switcher", alphaProject.name);
       await page.waitForURL(

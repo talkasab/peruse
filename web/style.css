@@ -782,6 +782,7 @@ table.fm-card {
   display: table;
   width: auto;
   min-width: 50%;
+  max-width: 100%;
   border-collapse: collapse;
   margin-bottom: 22px;
   background: var(--mantle);
@@ -796,6 +797,11 @@ table.fm-card {
   border-bottom: 1px solid var(--surface0);
   padding: 4px 14px;
   text-align: left;
+  color: var(--text);
+  vertical-align: top;
+}
+.fm-card tr:nth-child(2n) td {
+  background: transparent;
 }
 .fm-card tr:last-child th,
 .fm-card tr:last-child td {
@@ -805,14 +811,80 @@ table.fm-card {
   font:
     600 11.5px ui-monospace,
     monospace;
-  color: var(--subtext0);
+  color: var(--subtext1);
   background: none;
   white-space: nowrap;
   vertical-align: top;
 }
 .fm-card .fm-raw {
   font-family: ui-monospace, monospace;
-  color: var(--subtext0);
+  color: var(--subtext1);
+  white-space: pre-wrap;
+}
+.fm-card .fm-null {
+  color: var(--subtext1);
+}
+.fm-card .fm-paragraph,
+.fm-card .fm-list,
+.fm-card .fm-subcard,
+.fm-card .fm-nested-table {
+  margin: 0;
+}
+.fm-card .fm-paragraph {
+  white-space: pre-wrap;
+}
+.fm-card .fm-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.fm-card .fm-chip {
+  display: inline-block;
+  padding: 1px 8px;
+  border: 1px solid var(--surface1);
+  border-radius: 99px;
+  background: var(--surface0);
+  color: var(--text);
+  white-space: nowrap;
+}
+.fm-card .fm-list {
+  padding-left: 1.4em;
+}
+.fm-card .fm-subcard,
+.fm-card .fm-nested-table {
+  display: table;
+  width: 100%;
+  border-collapse: collapse;
+  font-size: inherit;
+}
+.fm-card .fm-subcard {
+  border-left: 2px solid var(--surface2);
+}
+.fm-card .fm-subcard th,
+.fm-card .fm-subcard td,
+.fm-card .fm-nested-table th,
+.fm-card .fm-nested-table td {
+  border: 1px solid var(--surface1);
+  padding: 4px 8px;
+}
+.fm-card .fm-nested-table thead th {
+  background: var(--surface0);
+  color: var(--text);
+}
+.fm-card .fm-table-scroll {
+  max-width: min(70vw, 880px);
+  overflow-x: auto;
+}
+.fm-card .fm-nested-table td {
+  overflow-wrap: anywhere;
+}
+.fm-card .fm-nested-table tbody tr:nth-child(2n) td {
+  background: var(--surface0);
+}
+.fm-card a {
+  color: var(--text);
+  text-decoration: underline;
+  overflow-wrap: anywhere;
 }
 
 .image-view {

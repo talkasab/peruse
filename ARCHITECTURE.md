@@ -22,7 +22,7 @@ dist/                 prebuilt single-bundle client (bun build; auto-rebuilt whe
 
 One external runtime dependency: **chokidar** (Bun's native watcher drops
 events). Client libraries (markdown-it + plugins, Shiki, diff2html,
-DOMPurify, Alpine.js, @catppuccin/palette) are devDependencies bundled into
+DOMPurify, Alpine.js, @catppuccin/palette, yaml) are devDependencies bundled into
 `dist/`.
 
 ## CLI (`bin/peruse.js`)
@@ -315,9 +315,20 @@ hostname/project document-title contract.
 - **Markdown**: markdown-it (GFM: tables, strikethrough, autolinks,
   task lists, anchors, footnotes; raw HTML on). Every block token carries
   `data-lines` (source range) via a core rule; fences highlighted by the
-  same Shiki instance as code files. YAML frontmatter renders as a
-  key/value card; stripped lines are replaced with blanks so `data-lines`
-  stays true to file lines. Relative links open in-app (tree follows);
+  same Shiki instance as code files. Leading YAML frontmatter is parsed as
+  one YAML 1.2 mapping and rendered in a card: scalar key/value rows,
+  chips when every array item is a string of at most 80 characters without a
+  newline, nested-map subcards, union-column tables for lists of maps, and
+  paragraphs for folded or literal block scalars, including aliases. Other
+  arrays render as lists; empty collections leave their value cells blank,
+  and YAML null displays as an em dash. HTTP(S) scalar values become external
+  links, with sentence-final punctuation outside the link. Invalid YAML,
+  multiple documents, and non-map roots retain the old per-line card. The
+  `yaml` package is bundled with the client. Stripped frontmatter lines are
+  replaced with blanks so `data-lines` stays true to file lines. The entire
+  card has one source range;
+  frontmatter hunks each retain a rail mark, but all attach to the card rather
+  than to individual rows. Relative links open in-app (tree follows);
   relative images rewrite to `/raw/`; external links get `target=_blank`.
   Rendered HTML passes through DOMPurify before DOM insertion; raw HTML
   remains supported, while active content and Alpine directives (`x-*`,
@@ -500,8 +511,10 @@ they guard.
   discovery, enumeration cache (TTL, registry-key invalidation, interleaved
   pending coalescing, immutable overlays, target incarnation checks),
   parseHunks, withContext, safePath, buildTree, gitStatus porcelain-v2
-  parsing, web/lib.js helpers, rendered HTML sanitization and compatibility,
-  mdsvex grammar — per-region token colours measured under both themes) +
+  parsing, web/lib.js helpers, structured frontmatter parsing/rendering,
+  adversarial YAML and line-accounting fixtures, rendered HTML sanitization
+  and compatibility, mdsvex grammar — per-region token colours measured under
+  both themes) +
   **integration** (`test/integration/`: real server + real git over HTTP —
   encoded multi-root routes, landing data, source-root version resolution,
   tree/file/raw contracts, enumeration
@@ -516,7 +529,9 @@ they guard.
   processes. `project-switcher.test.js` runs alone first, then
   `branch-state.test.js` runs alone; each owns a fixture, server, and Chromium
   instance. `core.test.js`, `navigation.test.js`, and `sanitize.test.js` share
-  the third process. Core carries eight Chromium journeys — smoke, code review
+  the third process. Core carries nine Chromium journeys — smoke, structured
+  frontmatter (card counts, hostile input, source links, and both-theme
+  contrast), code review
   (exact marks, popup scope, Copy raw), popup orientation (measured above/below
   gaps for code and Markdown, neither-fits fallback, navigation, split-height
   changes, and resize), markdown review (rail single-x measurement, innermost

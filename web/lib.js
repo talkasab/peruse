@@ -1,5 +1,6 @@
 // Pure helpers shared by app.js and the unit tests — no DOM, no Alpine,
 // no Shiki, so tests can import this module without the heavy client boot.
+import { isAlias, isMap, isScalar, isSeq, parseDocument } from "yaml";
 
 /** @param {string} s */
 export const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -98,12 +99,12 @@ export function hunkRange(h) {
 
 /**
  * Split leading YAML frontmatter off markdown content.
- * Returns null when there is none; otherwise { rows, body, lines } where rows are
+ * Returns null when there is none; otherwise { source, rows, body, lines } where rows are
  * {key, value} or {raw} entries and body has the frontmatter lines replaced
  * by blanks so markdown-it's source line maps stay aligned with the file, and
  * lines is the inclusive source extent of the frontmatter card.
  * @param {string} content
- * @returns {{rows: Array<{key: string, value: string} | {raw: string}>, body: string, lines: number} | null}
+ * @returns {{source: string, rows: Array<{key: string, value: string} | {raw: string}>, body: string, lines: number} | null}
  */
 export function splitFrontmatter(content) {
   const fm = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(content);
@@ -114,5 +115,139 @@ export function splitFrontmatter(content) {
   });
   const body = "\n".repeat(fm[0].split("\n").length - 1) + content.slice(fm[0].length);
   const lines = fm[0].split("\n").length - Number(fm[0].endsWith("\n"));
-  return { rows, body, lines };
+  return { source: fm[1], rows, body, lines };
+}
+
+/**
+ * Parse one YAML mapping. Invalid, multi-document, and non-map input returns
+ * null so the caller can retain splitFrontmatter's line fallback.
+ * @param {string} source
+ * @returns {{data: Record<string, unknown>, blockPaths: Set<string>} | null}
+ */
+export function parseFrontmatter(source) {
+  try {
+    const doc = parseDocument(source, { stringKeys: true, logLevel: "error" });
+    if (doc.errors.length || !isMap(doc.contents)) return null;
+    const data = /** @type {Record<string, unknown>} */ (doc.toJS({ maxAliasCount: 50 }));
+    const blockPaths = new Set();
+    const activeNodes = new WeakSet();
+    /** @param {unknown} node @param {(string | number)[]} path */
+    const visit = (node, path) => {
+      if (!node || typeof node !== "object" || activeNodes.has(node)) return;
+      activeNodes.add(node);
+      if (isAlias(node)) {
+        visit(node.resolve(doc), path);
+      } else if (isScalar(node)) {
+        if (node.type === "BLOCK_FOLDED" || node.type === "BLOCK_LITERAL")
+          blockPaths.add(JSON.stringify(path));
+      } else if (isMap(node)) {
+        for (const pair of node.items) {
+          if (isScalar(pair.key)) visit(pair.value, [...path, String(pair.key.value)]);
+        }
+      } else if (isSeq(node)) {
+        for (const [index, item] of node.items.entries()) visit(item, [...path, index]);
+      }
+      activeNodes.delete(node);
+    };
+    visit(doc.contents, []);
+    return { data, blockPaths };
+  } catch {
+    return null;
+  }
+}
+
+/** @param {unknown} value @returns {value is Record<string, unknown>} */
+const isRecord = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+
+/** @param {unknown} value */
+function renderScalar(value) {
+  const display = String(value);
+  const urlParts = /^(https?:\/\/\S+?)([.,;:)\]]*)$/i.exec(display);
+  if (urlParts) {
+    try {
+      const [, link, punctuation] = urlParts;
+      const url = new URL(link);
+      if (url.protocol === "http:" || url.protocol === "https:")
+        return `<a href="${esc(link).replaceAll('"', "&quot;")}" target="_blank" rel="noopener">${esc(link)}</a>${esc(punctuation)}`;
+    } catch {
+      // Keep malformed URLs as readable text.
+    }
+  }
+  return esc(display);
+}
+
+/**
+ * @param {unknown} value
+ * @param {(string | number)[]} path
+ * @param {Set<string>} blockPaths
+ * @param {WeakSet<object>} ancestors
+ * @returns {string}
+ */
+function renderValue(value, path, blockPaths, ancestors) {
+  if (value === null) return '<span class="fm-null" title="null">—</span>';
+  if (!isRecord(value) && !Array.isArray(value)) {
+    const content = renderScalar(value);
+    return blockPaths.has(JSON.stringify(path))
+      ? `<p class="fm-paragraph">${content}</p>`
+      : content;
+  }
+  if (
+    (Array.isArray(value) && value.length === 0) ||
+    (isRecord(value) && Object.keys(value).length === 0)
+  )
+    return "";
+  if (ancestors.has(value)) return `<span class="fm-raw">[circular reference]</span>`;
+  ancestors.add(value);
+  let content;
+  if (Array.isArray(value)) {
+    if (value.length && value.every(isRecord)) {
+      const keys = [...new Set(value.flatMap((item) => Object.keys(item)))];
+      content = `<div class="fm-table-scroll"><table class="fm-nested-table"><thead><tr>${keys.map((key) => `<th>${esc(key)}</th>`).join("")}</tr></thead><tbody>${value
+        .map(
+          (item, index) =>
+            `<tr>${keys.map((key) => `<td>${Object.hasOwn(item, key) ? renderValue(item[key], [...path, index, key], blockPaths, ancestors) : ""}</td>`).join("")}</tr>`,
+        )
+        .join("")}</tbody></table></div>`;
+    } else if (
+      value.length &&
+      value.every((item) => typeof item === "string" && item.length <= 80 && !item.includes("\n"))
+    ) {
+      content = `<div class="fm-chips">${value.map((item) => `<span class="fm-chip">${renderScalar(item)}</span>`).join("")}</div>`;
+    } else {
+      content = `<ul class="fm-list">${value.map((item, index) => `<li>${renderValue(item, [...path, index], blockPaths, ancestors)}</li>`).join("")}</ul>`;
+    }
+  } else {
+    content = `<table class="fm-subcard"><tbody>${Object.entries(value)
+      .map(
+        ([key, item]) =>
+          `<tr><th>${esc(key)}</th><td>${renderValue(item, [...path, key], blockPaths, ancestors)}</td></tr>`,
+      )
+      .join("")}</tbody></table>`;
+  }
+  ancestors.delete(value);
+  return content;
+}
+
+/**
+ * Render parsed frontmatter, or preserve the original per-line card on errors.
+ * The outer card alone owns the source range for Markdown change marks.
+ * @param {NonNullable<ReturnType<typeof splitFrontmatter>>} fm
+ */
+export function renderFrontmatter(fm) {
+  const parsed = parseFrontmatter(fm.source);
+  const rows = parsed
+    ? Object.entries(parsed.data)
+        .map(
+          ([key, value]) =>
+            `<tr><th>${esc(key)}</th><td>${renderValue(value, [key], parsed.blockPaths, new WeakSet())}</td></tr>`,
+        )
+        .join("")
+    : fm.rows
+        .map((row) =>
+          "raw" in row
+            ? `<tr><td colspan="2" class="fm-raw">${esc(row.raw)}</td></tr>`
+            : `<tr><th>${esc(row.key)}</th><td>${esc(row.value)}</td></tr>`,
+        )
+        .join("");
+  return `<table class="fm-card" data-lines="1-${fm.lines}"><tbody>${rows}</tbody></table>`;
 }
