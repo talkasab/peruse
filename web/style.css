@@ -322,6 +322,12 @@ main {
   border-radius: 10px;
   padding: 24px;
 }
+.landing-error {
+  color: var(--text);
+}
+.project-load-status {
+  padding: clamp(32px, 7vw, 88px) clamp(20px, 8vw, 120px);
+}
 .landing-version {
   max-width: 980px;
   margin-top: 18px;
