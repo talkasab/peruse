@@ -47,7 +47,8 @@
     "markdown-it-task-lists": "^2.1.1",
     "playwright-core": "^1.61.1",
     "shiki": "^3.7.0",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "yaml": "^2.9.1"
   },
   "publishConfig": {
     "access": "public"

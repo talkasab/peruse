@@ -4,7 +4,6 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { appendFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-
 import {
   COPY_CODE,
   COPY_MARKDOWN,
@@ -15,6 +14,7 @@ import {
   SVX_HL_LINE_LIMIT,
   startFixtureServer,
 } from "../fixture.js";
+import { measureContrast } from "./contrast.js";
 
 let srv, root, browser, page;
 const T = 30_000;
@@ -80,30 +80,7 @@ describe("smoke", () => {
 
         const contrastByTheme = {};
         for (let sample = 0; sample < 2; sample++) {
-          const measured = await landing.locator(".landing-version").evaluate((version) => {
-            const channels = (color) =>
-              color
-                .match(/[\d.]+/g)
-                .slice(0, 3)
-                .map((channel) => Number(channel) / 255);
-            const luminance = (color) =>
-              channels(color)
-                .map((channel) =>
-                  channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4,
-                )
-                .reduce(
-                  (sum, channel, index) => sum + channel * [0.2126, 0.7152, 0.0722][index],
-                  0,
-                );
-            const foreground = luminance(getComputedStyle(version).color);
-            const background = luminance(getComputedStyle(document.body).backgroundColor);
-            return {
-              theme: document.documentElement.dataset.theme,
-              ratio:
-                (Math.max(foreground, background) + 0.05) /
-                (Math.min(foreground, background) + 0.05),
-            };
-          });
+          const measured = await landing.locator(".landing-version").evaluate(measureContrast);
           contrastByTheme[measured.theme] = measured.ratio;
           await landing.click(".theme-btn");
           await landing.waitForFunction(
@@ -132,6 +109,92 @@ describe("smoke", () => {
       expect(await page.locator(".project-switcher option").count()).toBe(1);
       expect(await page.locator(".project-switcher").inputValue()).toBe(srv.project.name);
       expect(await page.locator(".brand").getAttribute("title")).toBe(srv.version);
+    },
+    T,
+  );
+});
+
+describe("structured YAML frontmatter", () => {
+  test(
+    "OKF card has measured rows, chips, sources, links, and readable colors in both themes",
+    async () => {
+      await openFile("docs/imaging-problem-list.md");
+      const card = page.locator(".fm-card");
+      await card.waitFor();
+      expect(await card.count()).toBe(1);
+      expect(await card.locator(":scope > tbody > tr").count()).toBe(7);
+      expect(await card.locator(".fm-chip").count()).toBe(4);
+      expect(await card.locator(".fm-subcard tr").count()).toBe(2);
+      expect(await card.locator(".fm-nested-table tbody tr").count()).toBe(9);
+      expect(await card.locator(".fm-raw").count()).toBe(0);
+      const links = card.locator(".fm-nested-table a[href]");
+      expect(await links.count()).toBe(9);
+      expect(await links.first().getAttribute("href")).toBe(
+        "https://github.com/openimagingdata/imaging-problem-list/blob/06f64a7893b444b761dc069ed86140a081195eac/README.md",
+      );
+      expect(await links.first().getAttribute("target")).toBe("_blank");
+      expect(await links.first().getAttribute("rel")).toContain("noopener");
+      const sourceRowBackgrounds = await card
+        .locator(".fm-nested-table tbody tr")
+        .evaluateAll((rows) =>
+          rows.slice(0, 2).map((row) => getComputedStyle(row.querySelector("td")).backgroundColor),
+        );
+      expect(sourceRowBackgrounds[0]).not.toBe(sourceRowBackgrounds[1]);
+
+      const contrastByTheme = {};
+      const selectors = [
+        ":scope > tbody > tr > th",
+        ":scope > tbody > tr > td",
+        ".fm-chip",
+        ".fm-subcard th",
+        ".fm-subcard td",
+        ".fm-nested-table thead th",
+        ".fm-nested-table tbody td",
+        ".fm-nested-table tbody tr:nth-child(2n) td",
+        ".fm-nested-table a",
+      ];
+      for (let sample = 0; sample < 2; sample++) {
+        const theme = await page.evaluate(() => document.documentElement.dataset.theme);
+        const ratios = {};
+        for (const selector of selectors) {
+          const measured = await card.locator(selector).first().evaluate(measureContrast);
+          ratios[selector] = measured.ratio;
+          expect(measured.ratio).toBeGreaterThanOrEqual(4.5);
+        }
+        contrastByTheme[theme] = ratios;
+        await page.click(".theme-btn");
+        await page.waitForFunction(
+          (previous) => document.documentElement.dataset.theme !== previous,
+          theme,
+        );
+      }
+      expect(Object.keys(contrastByTheme).sort()).toEqual(["latte", "mocha"]);
+      console.info("frontmatter contrast", contrastByTheme);
+    },
+    T,
+  );
+
+  test(
+    "hostile YAML reaches the card as text, with only safe links",
+    async () => {
+      await openFile("docs/hostile-frontmatter.md");
+      const card = page.locator(".fm-card");
+      await card.waitFor();
+      expect(await card.locator("img, script, iframe").count()).toBe(0);
+      expect(await card.innerText()).toContain("<img src=x onerror=alert(1)>");
+      expect(
+        await card
+          .locator(".fm-paragraph")
+          .first()
+          .evaluate((element) => getComputedStyle(element).whiteSpace),
+      ).toBe("pre-wrap");
+      const links = card.locator("a[href]");
+      expect(await links.count()).toBe(2);
+      expect(
+        await links.evaluateAll((items) => items.map((item) => item.getAttribute("href"))),
+      ).toEqual(["https://example.test/a\"b'c", "http://example.test/ok"]);
+      expect(await links.first().getAttribute("target")).toBe("_blank");
+      expect(await links.first().getAttribute("rel")).toContain("noopener");
     },
     T,
   );

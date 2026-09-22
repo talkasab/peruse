@@ -50,6 +50,7 @@ import {
   hunkRange,
   langForPath as libLangForPath,
   resolveLang as libResolveLang,
+  renderFrontmatter,
   resolveRel,
   splitFrontmatter,
 } from "./lib.js";
@@ -549,21 +550,14 @@ Alpine.data("peruse", () => ({
   /** @param {HTMLElement} v @param {TextFile} f */
   renderMarkdown(v, f) {
     const dir = f.path.split("/").slice(0, -1).join("/");
-    // YAML frontmatter → key/value card (GitHub-style), never body text.
+    // YAML frontmatter → structured card, never body text.
     // The stripped lines are replaced with blanks so markdown-it's source
     // line maps (data-lines) stay aligned with the file's real line numbers.
     let body = f.content,
       fmCard = "";
     const fm = splitFrontmatter(f.content);
     if (fm) {
-      const rows = fm.rows
-        .map((r) =>
-          "raw" in r
-            ? `<tr><td colspan="2" class="fm-raw">${esc(r.raw)}</td></tr>`
-            : `<tr><th>${esc(r.key)}</th><td>${esc(r.value)}</td></tr>`,
-        )
-        .join("");
-      fmCard = `<table class="fm-card" data-lines="1-${fm.lines}">${rows}</table>`;
+      fmCard = renderFrontmatter(fm);
       body = fm.body;
     }
     v.innerHTML = sanitizeHTML(

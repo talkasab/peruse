@@ -7,7 +7,7 @@
 // raw chokidar in the current Bun/Node matrix, and the real peruse server
 // filters it and serves normally; the omission is fixture scope, not a hang
 // workaround.
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { chromium } from "playwright-core";
@@ -413,6 +413,14 @@ export function makeFixtureRepo() {
   writeFileSync(join(dir, "src/util.py"), UTIL_BASE);
   writeFileSync(join(dir, "src/popup-position.js"), POPUP_CODE_BASE);
   writeFileSync(join(dir, "docs/guide.md"), GUIDE_BASE);
+  writeFileSync(
+    join(dir, "docs/imaging-problem-list.md"),
+    readFileSync(join(import.meta.dir, "fixtures/frontmatter/imaging-problem-list.md")),
+  );
+  writeFileSync(
+    join(dir, "docs/hostile-frontmatter.md"),
+    readFileSync(join(import.meta.dir, "fixtures/frontmatter/hostile.md")),
+  );
   writeFileSync(join(dir, "docs/popup-position.md"), POPUP_MARKDOWN_BASE);
 
   writeFileSync(join(dir, "docs/copy.md"), COPY_MARKDOWN);

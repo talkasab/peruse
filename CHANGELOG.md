@@ -11,6 +11,10 @@ date and becomes the GitHub release notes (see
 
 ## [Unreleased]
 
+### Changed
+- YAML frontmatter now shows nested fields, tags, source tables, and clickable
+  URLs as structured data instead of raw lines (#38)
+
 ## [1.1.0] - 2026-08-07
 
 ### Fixed
