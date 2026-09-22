@@ -3,19 +3,20 @@ import { existsSync, statSync } from "node:fs";
 import { networkInterfaces } from "node:os";
 // peruse [path] [--port 7440] [--host 127.0.0.1]
 import { resolve } from "node:path";
-import { startServer } from "../server/index.js";
-import {
-  pruneProjects,
-  readProjects,
-  registerProject,
-  registryPath,
-  removeProject,
-} from "../server/projects.js";
 
-// The watcher costs one fd per watched path, and stock shells (macOS: 256)
-// are far too small for real trees. Re-exec once through sh with the soft
-// limit raised toward the hard limit; if raising fails, the server's watch
-// budget still keeps us alive, just with fewer live paths.
+const bunVersion = globalThis.Bun?.version;
+const [bunMajor, bunMinor] = (bunVersion ?? "0.0").split(".").map(Number);
+if (!bunVersion || bunMajor < 1 || (bunMajor === 1 && bunMinor < 4)) {
+  console.error(`peruse: Bun >= 1.4.0 is required (found ${bunVersion ?? "no Bun runtime"})`);
+  process.exit(1);
+}
+const { startServer } = await import("../server/index.js");
+const { pruneProjects, readProjects, registerProject, registryPath, removeProject } = await import(
+  "../server/projects.js"
+);
+
+// Keep the existing low-fd re-exec until the native watcher is measured on
+// macOS. Linux inotify watches do not consume one fd per path.
 if (process.platform !== "win32" && !process.env.PERUSE_FDS_RAISED) {
   const soft = Number(Bun.spawnSync(["sh", "-c", "ulimit -n"]).stdout.toString().trim()) || 0;
   if (soft > 0 && soft < 4096) {

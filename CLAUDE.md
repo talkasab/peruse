@@ -21,10 +21,12 @@ implemented** and is the source of truth.
 ## Core principles (from the original design conversation)
 
 - **Minimum code, maximum leverage.** Assemble best-in-class libraries
-  (markdown-it, Shiki, diff2html, chokidar, Alpine); if you find yourself
-  writing a lot of code, question the approach.
-- **Bun-native.** Use Bun built-ins (Bun.serve, Bun.file, Bun.spawn,
-  bun build); chokidar is the only allowed server dependency.
+  rather than writing our own; the current set is whatever package.json and
+  ARCHITECTURE.md say today. If you find yourself writing a lot of code,
+  question the approach.
+- **Bun-native.** Prefer Bun built-ins over dependencies. A server runtime
+  dependency needs a strong, documented reason; check package.json for what
+  is actually depended on rather than assuming.
 - **Never a whole-page diff view.** Subtle marks on exactly the changed
   lines/blocks; clicking opens that individual change's diff in a popup
   anchored at the mark. Additions and wholly-new files get marks/badges

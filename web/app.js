@@ -985,7 +985,7 @@ Alpine.data("peruse", () => ({
     es.onmessage = (ev) => {
       const d = /** @type {ChangeEvent} */ (JSON.parse(ev.data));
       this.refreshTree();
-      if (this.file && (d.changed.includes(this.file.path) || d.git))
+      if (this.file && (d.changed.includes("") || d.changed.includes(this.file.path) || d.git))
         this.selectFile(this.file.path, { preserve: true });
     };
     es.onopen = () => {

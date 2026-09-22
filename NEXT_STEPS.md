@@ -39,8 +39,6 @@ lean on knowing which workspace/pane a file belongs to.
 
 - **#29** e2e pipe-stall workarounds — evidence ledger is current; retire
   when upstream Bun/Playwright fixes land.
-- **Upstream readdirp ENOTDIR report** (filed from #17's investigation) —
-  if accepted, the stall-watchdog fallback in server/index.js can shrink.
 - **#8 Shiki off the main thread** — benchmark numbers attached from the
   #18 work (~600 ms cold at the 3,500-line boundary); do when felt.
 - **#21, #12, #13** — network-mode symlink confinement, Mermaid/KaTeX,

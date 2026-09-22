@@ -1,16 +1,11 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { watch as fsWatch, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import chokidar from "chokidar";
 import { startServer } from "../../server/index.js";
 import { registerProject, registryPath, removeProject } from "../../server/projects.js";
 
-// Composed #17 + #28 lifecycle: these scenarios exist only with both the
-// watcher-recovery readiness contract (issue #17) and the enumeration
-// cache/invalidation paths (issue #28) present, so they live here rather than
-// in either branch's own suite. Every wait is bounded so a regression fails
-// instead of hanging.
+// Runtime creation, cache invalidation, and SSE teardown share these checks.
 
 const DEADLINE = 1500;
 
@@ -36,13 +31,12 @@ function makeRepo({ poison = false } = {}) {
   writeFileSync(join(root, "README.md"), "# Composed lifecycle\n");
   git(root, "add", ".");
   git(root, "commit", "-qm", "initial");
-  // A link *through* a regular file fails realpath() with ENOTDIR, which
-  // destroys chokidar's listing and leaves readiness pending (issue #17).
+  // Bun skips this ENOTDIR symlink and continues watching its siblings.
   if (poison) symlinkSync(join(root, "README.md", "nope"), join(root, "scan-breaker"));
   return root;
 }
 
-async function startFixture(port, { poison = false } = {}) {
+async function startFixture(port, { poison = false, watchFactory = fsWatch } = {}) {
   const root = makeRepo({ poison });
   const configDir = mkdtempSync(join(tmpdir(), "peruse-composed-config-"));
   const configFile = registryPath(configDir);
@@ -51,8 +45,8 @@ async function startFixture(port, { poison = false } = {}) {
     configFile,
     host: "127.0.0.1",
     port,
-    watchBudget: 100,
     enumerationTtlMs: 60_000,
+    watchFactory,
   });
   const base = `http://127.0.0.1:${server.port}/p/${encodeURIComponent(project.name)}`;
   return {
@@ -84,16 +78,12 @@ function collectRejections() {
 }
 
 function countWatchers() {
-  const originalWatch = chokidar.watch;
   const state = { created: 0 };
-  chokidar.watch = (...args) => {
-    state.created++;
-    return originalWatch(...args);
-  };
   return {
     state,
-    restore() {
-      chokidar.watch = originalWatch;
+    watchFactory(...args) {
+      state.created++;
+      return fsWatch(...args);
     },
   };
 }
@@ -104,28 +94,11 @@ afterEach(async () => {
   fixture = null;
 });
 
-describe("composed watcher/cache lifecycle (#17 + #28)", () => {
-  test("route invalidation settles a request awaiting a scan-broken runtime", async () => {
-    const rejections = collectRejections();
-    fixture = await startFixture(7581, { poison: true });
-    // The stall watchdog needs 3 s of quiet before recovery, so 300 ms in the
-    // scan is squarely inside the pending-readiness window.
-    const first = fetch(`${fixture.base}/api/tree`);
-    await Bun.sleep(300);
-    expect(removeProject(fixture.project.name, fixture.configFile)).toBe(1);
-    // The same cached route, not the listing: this drives resolveProject's
-    // invalidation path, which closes the pending runtime.
-    const invalidator = await within(fetch(`${fixture.base}/api/tree`), "invalidating request");
-    expect(invalidator.status).toBe(404);
-    const original = await within(first, "request awaiting closed readiness");
-    expect(original.status).toBe(404);
-    await rejections.assertNone();
-  });
-
+describe("watcher and route cache lifecycle", () => {
   test("concurrent cold and retry waves each create exactly one runtime", async () => {
     const watchers = countWatchers();
     try {
-      fixture = await startFixture(7582);
+      fixture = await startFixture(7582, { watchFactory: watchers.watchFactory });
       const cold = await within(
         Promise.all(Array.from({ length: 20 }, () => fetch(`${fixture.base}/raw/README.md`))),
         "cold request wave",
@@ -148,15 +121,15 @@ describe("composed watcher/cache lifecycle (#17 + #28)", () => {
       expect(retry.map((r) => r.status)).toEqual(Array(20).fill(200));
       expect(watchers.state.created).toBe(2);
     } finally {
-      watchers.restore();
+      await fixture?.cleanup();
+      fixture = null;
     }
   });
 
-  test("a recovered fallback runtime invalidated through the cache ends its SSE stream", async () => {
+  test("a native watcher invalidated through the cache ends its SSE stream", async () => {
     const rejections = collectRejections();
     fixture = await startFixture(7583, { poison: true });
-    // Recovery resolves readiness after the ~3 s stall inspection; the first
-    // request completing proves the fallback path is active.
+    // The poisoned symlink does not delay the first request.
     const tree = await within(fetch(`${fixture.base}/api/tree`), "recovered tree", 8000);
     expect(tree.status).toBe(200);
 

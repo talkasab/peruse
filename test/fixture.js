@@ -1,12 +1,8 @@
 // Shared fixture: a throwaway git repo exercising every state peruse
 // renders, including the shapes that caused real incidents (see DEVLOG):
 // separated edits, symlinks, ignored dirs, oversized dirs.
-// NOTE: no socket/FIFO is included: this shared repository fixture stays
-// filesystem-portable, so the `ignored` callback's special-file skip is
-// verified by standalone probes instead. A pre-existing FIFO does not hang
-// raw chokidar in the current Bun/Node matrix, and the real peruse server
-// filters it and serves normally; the omission is fixture scope, not a hang
-// workaround.
+// No socket or FIFO is included so the shared fixture stays portable. The
+// native watcher watches the containing directory rather than those entries.
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -475,10 +471,7 @@ export function makeFixtureRepo() {
   writeFileSync(join(dir, "ignored-dir/junk.txt"), "junk\n");
 
   // incident e30232f: dangling symlink + symlink chain must not crash anything.
-  // Kept in their own dir out of caution about symlink handling in the
-  // watcher; a merely dangling link turned out to be harmless there, while the
-  // links that do break chokidar's scan (issue #17, ENOTDIR-style) are built
-  // per-test in watch-recovery.test.js rather than shared here.
+  // A separate watcher test uses an ENOTDIR symlink alongside live files.
   mkdirSync(join(dir, "linkfarm"));
   symlinkSync("/nonexistent-target", join(dir, "linkfarm/dangling"));
   symlinkSync(join(dir, "README.md"), join(dir, "linkfarm/readme-link"));
@@ -506,12 +499,6 @@ export function makePlainDir() {
 }
 
 export async function startFixtureServer(root, port, opts = {}) {
-  // Generous default watch budget: the fixture's 510-file bigdir would eat
-  // the fd-derived default and silently mask watcher behaviors under test.
-  // Pass opts.budget to exercise the budget itself — startServer's explicit
-  // watchBudget option takes precedence over the fd-derived default without
-  // touching process.env (which would race if tests ever ran in parallel).
-  const { budget, ...rest } = opts;
   const configDir = mkdtempSync(join(tmpdir(), "peruse-config-"));
   const configFile = registryPath(configDir);
   const project = registerProject(root, { file: configFile });
@@ -519,8 +506,7 @@ export async function startFixtureServer(root, port, opts = {}) {
     configFile,
     port,
     host: "127.0.0.1",
-    watchBudget: budget ?? 5000,
-    ...rest,
+    ...opts,
   });
   const origin = `http://127.0.0.1:${srv.port}`;
   const base = `${origin}/p/${encodeURIComponent(project.name)}`;

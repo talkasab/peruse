@@ -15,15 +15,14 @@ change. Catppuccin Latte/Mocha. It never writes to the directory it serves.
 ```
 bin/peruse.js         CLI: registry verbs, args, fd-limit re-exec, URL printing
 server/projects.js    project registry + live worktrees + landing git summaries
-server/index.js       Bun.serve: multi-root routes + git + lazy chokidar→SSE
+server/index.js       Bun.serve: multi-root routes + git + lazy fs.watch to SSE
 web/{index.html,app.js,style.css}   client source
 dist/                 prebuilt single-bundle client (bun build; auto-rebuilt when stale)
 ```
 
-One external runtime dependency: **chokidar** (Bun's native watcher drops
-events). Client libraries (markdown-it + plugins, Shiki, diff2html,
-DOMPurify, Alpine.js, @catppuccin/palette) are devDependencies bundled into
-`dist/`.
+There are no external runtime dependencies. Client libraries (markdown-it +
+plugins, Shiki, diff2html, DOMPurify, Alpine.js, @catppuccin/palette) are
+devDependencies bundled into `dist/`. Bun 1.4.0 or newer is required.
 
 ## CLI (`bin/peruse.js`)
 
@@ -41,9 +40,10 @@ DOMPurify, Alpine.js, @catppuccin/palette) are devDependencies bundled into
   missing projects immediately. `PERUSE_CONFIG_DIR` overrides the config
   directory for tests and isolated environments.
 
-- If the soft fd limit is low (<4096), re-execs itself once through `sh`
-  with `ulimit -n` raised toward the hard limit (watcher fds; stock macOS
-  shells allow 256). Guarded by `PERUSE_FDS_RAISED`.
+- The CLI rejects Bun versions below 1.4.0 before serving. It still re-execs
+  once through `sh` to raise a soft fd limit below 4096. This legacy guard
+  awaits native-watcher measurement on macOS. On Linux, inotify watches share
+  a process-wide fd, so the fd limit does not bound watched paths.
 - Default port walks forward to the next free one (up to +20); an explicit
   `--port` is pinned and fails loudly.
 - Binding `0.0.0.0`/`::` prints every reachable URL (localhost + each
@@ -175,98 +175,56 @@ splices up to 3 context lines around each change into the hunk's `patch`
 arithmetic handles the count-0 line-after-which convention). Fields:
 `oldStart/oldLines/newStart/newLines/kind(added|modified|deleted)/patch`.
 
-### Watching → SSE
+### Watching to SSE
 
-`Bun.serve` runs with `idleTimeout: 0` — its 10 s default kills idle
-connections, which is fatal for the SSE stream (idle by design, 30 s
-pings) and for slow first responses; the git layer's own 30 s subprocess
-cap provides the real bound.
+`Bun.serve` runs with `idleTimeout: 0`. Its 10 s default would close idle SSE
+streams, which receive pings every 30 s. The Git layer has its own 30 s
+subprocess timeout.
 
-Each project/worktree gets an isolated chokidar watcher only on first access;
-landing-page listing alone starts none. Events are coalesced into ~200 ms batches:
-`{"changed": [paths], "git": bool}` (`.git/*` changes set `git`, are never
-forwarded as file events). Clients re-fetch the tree on any event and
-re-fetch the open file when it changed (preserving scroll + open popup).
-The watcher admits `.git/HEAD`, refs, index, and other administrative metadata;
-only `.git/objects` is excluded. Ordinary-repository branch switches and commits
-therefore refresh branch state after the existing ~200 ms event-coalescing
-window plus the bounded local Git/tree request. A linked worktree's `.git` is a
-pointer file whose real administrative directory is outside the served root;
-that external directory is not watched. Its branch state still refreshes on
-project navigation/reconnect and whenever checkout or another worktree event
-causes the existing status poll, but a metadata-only change can remain visible
-until that next refresh.
+Each project or worktree gets one `fs.watch(root, { recursive: true, ignore })`
+when first accessed. Landing-page listing starts no watcher. Bun 1.4 installs
+the recursive watches before `fs.watch` returns, so `ready` is fulfilled when
+the runtime is returned. The first project request still awaits it and checks
+the runtime's closed state afterward. There is no close-before-readiness state.
+Events are coalesced for about 200 ms into `{changed: [paths], git: bool}`. Clients fetch
+the tree for every event and fetch the open file when its path changed, Git
+metadata changed, or the event has an empty path.
 
-Robustness (each learned from a real failure):
-- `followSymlinks: false`; skip sockets/FIFOs/devices; watcher errors are
-  rate-limit logged, never fatal.
-- Never watch gitignored dirs (they're never shown expanded). Ignore set
-  refreshed from every git status call.
-- Watch budget: at most ⅛ of the real fd limit in distinct admitted paths,
-  shared by chokidar discovery and recovery fallback handles
-  (chokidar holds fds per watched *file* under Bun and doesn't reliably
-  pass `stats` to the ignore callback — admission is by first sight).
-  `PERUSE_WATCH_BUDGET` overrides; `startServer`'s `watchBudget` option (used
-  by tests) takes precedence over both.
-- Below ~1024 fds even the initial scan can starve the process: watching
-  is disabled entirely with a clear message instead.
-- The first project request waits for that project's lazy watcher's initial
-  scan (or the no-watch fallback) before responding, so an SSE client cannot
-  mutate a file in the gap between connecting and watcher readiness. Closing a
-  runtime always settles pending readiness with a distinct closure error;
-  request resolution converts only that signal to not-found and rechecks the
-  closed state after a fulfilled wait, so awaiters neither hang nor receive a
-  closed runtime. The readiness rejection has a permanent observer so closing
-  an unused runtime cannot emit an unhandled rejection. Runtime
-  teardown clears its ping, pending-flush, and recovery timers, closes and
-  forgets every attached SSE controller, closes its fallback watches, then
-  awaits watcher close. Every caller receives
-  the same close promise. Route invalidation and listing reconciliation remove
-  the runtime from the route map immediately but keep that promise registered;
-  the ended response lets browser `EventSource` reconnect to the route's
-  current runtime (or receive its current not-found response) instead of
-  remaining attached to a silent obsolete watcher.
-- Server shutdown first marks the lifecycle stopped and force-closes the HTTP
-  listener, then drains pending runtime starts, mapped runtimes, and detached
-  close promises until all three sets are empty. A start that finishes after
-  shutdown begins closes its produced runtime before resolving and can never
-  enter the route map. Consequently `await stop()` means no watcher startup or
-  teardown remains in flight.
-- Stall watchdog (issue #17). chokidar's scanner resolves every symlink it
-  meets with `realpath()` and survives only ENOENT/EPERM/EACCES/ELOOP; any
-  other errno (ENOTDIR in practice — a link pointing *through* a regular
-  file) destroys that directory's listing, silently and without an `error`
-  event. That listing both registers the watches and decrements chokidar's
-  ready count, so one such link leaves the directory unwatched *and* 'ready'
-  pending forever — and since the first request awaits `ready`, the project
-  would serve nothing at all. The ignore callback cannot prevent it (the link
-  is resolved before any filter runs), so the scan is watched for a stall
-  instead: every filtered path is a heartbeat, and 3 s of silence with
-  'ready' still pending triggers an inspection. Recovery names the offending
-  links (`findScanBreakingLinks`) and covers each admitted stranded directory
-  with a plain `fs.watch`, then resolves `ready`. The fallback treats the
-  platform event as an invalidation hint and diffs guarded `lstat` directory
-  snapshots, so rename-over atomic saves report the replaced target rather
-  than only the temporary filename. New directories are checked before being
-  handed to chokidar; a later poisoned directory moved into a recovered
-  directory therefore receives the same fallback. Fallback and traversal use
-  the normal skip/budget policy, and direct chokidar events are suppressed
-  wherever snapshot reconciliation owns coverage, making late completion
-  idempotent.
+`.git/HEAD`, refs, index, and other administrative metadata set `git: true`
+and never enter `changed`. `.git/objects`, `node_modules`, and Git-ignored
+directories are filtered by `skipRel`. Bun passes root-relative paths to its
+`ignore` predicate, which filters events but does not prevent installation of
+watches in those directories. The Git
+ignore set refreshes on every status request. An event with a null or undefined
+filename adds an empty path to `changed`, invalidating the whole tree and open
+file. This also covers events about the watched root itself.
 
-  Snapshot reconciliation cannot see a same-inode, same-length in-place
-  rewrite whose nanosecond mtime is restored, because its
-  `dev:ino:mode:size:mtimeNs` signature is unchanged. Timestamp-preserving
-  deployment tools can create that shape; normal chokidar coverage misses it
-  too, so this is a general watcher limitation rather than a recovery
-  regression.
+Bun's recursive watcher does not descend through symlink entries. It watches
+directories, not files or special-file entries. On Linux, the process shares
+one inotify fd and Bun installs one inotify watch per directory. The limiting
+resource for a large tree is `fs.inotify.max_user_watches`, not one fd per file.
+On Linux, an `ENOSPC` watcher error logs a message naming that setting. Other
+watcher errors also log; both are rate-limited and do not stop the server. Recursive
+watching can consume watches inside ignored directories because `ignore`
+filters events only.
 
-  Three seconds is deliberately a quiet-time heuristic, not proof that a scan
-  is dead. A healthy scan blocked in one unusually slow filesystem operation
-  can release the waiting request early; if inspection finds no culprit the
-  server warns that live coverage may remain incomplete while chokidar finishes
-  normally. Recovery never installs duplicate handles, and all timer-driven
-  filesystem operations tolerate deletion and permission changes.
+If the root watch throws while subscribing, the project still serves files
+without live updates and logs the same diagnostic. A later runtime starts a
+new subscription.
+
+A linked worktree's `.git` is a pointer file whose administrative directory
+lies outside the served root. That directory is not watched. Its branch state
+refreshes on project navigation, reconnect, or another status poll, but a
+metadata-only change can remain visible until the next refresh.
+
+Closing a runtime clears its ping and pending event-flush timers, closes its
+SSE controllers, and closes the watcher. All callers receive the same close
+promise. Route invalidation removes the runtime from the map immediately and
+tracks the close promise. The ended stream lets `EventSource` reconnect to the
+current route. Server shutdown closes the listener and drains pending starts,
+mapped runtimes, and detached closes. Runtime resolution rechecks the closed
+state and target identity after the readiness wait, so no request receives an
+obsolete runtime.
 
 ## Client (`web/`)
 
@@ -486,13 +444,8 @@ Three tiers (no test framework dependency; `playwright-core` for E2E). The
 core browser journeys share a fixture from `test/fixture.js`, which builds a
 throwaway git repo covering every state peruse renders — including the
 shapes behind past incidents (separated edits, symlinks, ignored dirs,
-oversized dirs). No socket/FIFO is included: the shared fixture stays portable
-and therefore does not directly cover the stats-based special-file skip. Raw
-chokidar reached `ready` without error with a pre-existing FIFO under both Bun
-1.3.14 and Node 26.6.0 (defaults, `ignoreInitial`, `followSymlinks:false`, and
-both options); a standalone server probe separately confirms peruse filters
-the FIFO and serves the tree normally. The contrary premise recorded in issue
-#20 did not reproduce in this verification matrix.
+oversized dirs). No socket or FIFO is included in the shared fixture, which stays portable.
+Bun watches the containing directory and does not descend into those entries.
 Regression assertions are tagged with the commit that fixed the incident
 they guard.
 
@@ -507,11 +460,9 @@ they guard.
   tree/file/raw contracts, enumeration
   and total Git spawns for a realistic navigation counted through patched
   `Bun.spawn`, cached target identity/missing state, SSE coalescing and gitignore-skip,
-  idle-connection survival, port fallback, tiny-watch-budget survival,
-  non-git degradation, watcher-stall recovery, runtime shutdown draining, and
-  the composed watcher/cache lifecycle — route invalidation settling a
-  scan-broken runtime's pending readiness, runtime-level startup coalescing,
-  and SSE stream EOF when a recovered runtime is invalidated).
+  idle-connection survival, port fallback, native recursive watching,
+  non-git degradation, runtime shutdown draining, and watcher/cache lifecycle
+  tests for startup coalescing and SSE stream EOF after invalidation).
 - `bun run test:e2e` → **E2E** (`test/e2e/`): five files in three ordered Bun
   processes. `project-switcher.test.js` runs alone first, then
   `branch-state.test.js` runs alone; each owns a fixture, server, and Chromium
@@ -571,13 +522,6 @@ code.
 
 No CI is wired up; the suite runs locally (`bun run test`, `bun run test:e2e`).
 CI automation is tracked in issue #1.
-
-Known watcher limitation: on a server that never entered recovery, a
-scan-breaking link created directly inside an already-watched directory may
-still be missed (chokidar's re-listing dies before emitting it). Once recovery
-is active, newly moved/created directories observed by a fallback are checked
-recursively; this does not claim to turn chokidar's normal post-ready scans
-into a fully supervised scanner.
 
 ## Layout invariants
 
