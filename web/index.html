@@ -122,12 +122,12 @@
         <span class="status" x-show="file?.status" :data-s="file?.status" x-text="file?.status"></span>
         <span class="spacer"></span>
         <span class="chip chip-group" x-show="reviewable.length">
-          <button type="button" class="chip-arrow" @click="cycleHunk(-1)" title="Previous change">‹</button>
+          <button type="button" class="chip-arrow" x-show="!svgRendered" @click="cycleHunk(-1)" title="Previous change">‹</button>
           <span x-text="hunkChip"></span>
-          <button type="button" class="chip-arrow" @click="cycleHunk(1)" title="Next change">›</button>
+          <button type="button" class="chip-arrow" x-show="!svgRendered" @click="cycleHunk(1)" title="Next change">›</button>
         </span>
-        <button type="button" class="chip" x-show="isMarkdown && !file?.binary" @click="raw = !raw"
-                x-text="raw ? 'Rendered' : 'Raw'"></button>
+        <button type="button" class="chip" x-show="fileView.sourceToggle" @click="raw = !raw"
+                x-text="raw ? 'Rendered' : isMarkdown ? 'Raw' : 'Source'"></button>
         <button type="button" class="chip copy-raw" x-show="file && !file.binary"
                 @click="copyRaw()" aria-label="Copy raw file contents"
                 x-text="copyLabel"></button>

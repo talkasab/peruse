@@ -5,6 +5,18 @@ import { isAlias, isMap, isScalar, isSeq, parseDocument } from "yaml";
 /** @param {string} s */
 export const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
+const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "webp", "ico", "avif", "bmp"]);
+
+/** @param {string} path @param {boolean} binary @returns {{kind: "image" | "binary" | "markdown" | "code", sourceToggle: boolean}} */
+export function fileView(path, binary) {
+  const ext = path.split(".").pop()?.toLowerCase() ?? "";
+  if (!binary && ext === "svg") return { kind: "image", sourceToggle: true };
+  if (binary && IMAGE_EXTS.has(ext)) return { kind: "image", sourceToggle: false };
+  if (binary) return { kind: "binary", sourceToggle: false };
+  if (ext === "md" || ext === "markdown") return { kind: "markdown", sourceToggle: true };
+  return { kind: "code", sourceToggle: false };
+}
+
 // extension / fence-info → grammar id (grammar aliases also resolve via the
 // loaded-set the caller passes in)
 /** @type {Record<string, string>} */

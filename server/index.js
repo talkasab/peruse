@@ -837,7 +837,12 @@ export async function startServer({
             const sp = safePath(projectRoot, decodeURIComponent(tail.slice(5)));
             if (!sp || !existsSync(sp.abs) || !statSync(sp.abs).isFile())
               return new Response("not found", { status: 404 });
-            return new Response(Bun.file(sp.abs));
+            return new Response(Bun.file(sp.abs), {
+              headers: {
+                "Content-Security-Policy":
+                  "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:",
+              },
+            });
           }
 
           if (tail === "/api/events") {
