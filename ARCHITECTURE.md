@@ -73,7 +73,7 @@ nor directory), but direct paths through them serve normally.
 | `GET /p/<name>/` | project viewer client; opening it updates the registered parent's `lastOpened`; an unavailable route returns a minimal hostname-titled HTML 404 |
 | `GET /p/<name>/api/tree` | nested JSON tree plus local branch state; per-file git status letter; gitignored flags; per-dir `dirty` flag; ignored dirs listed but not walked; ≤500 entries per dir |
 | `GET /p/<name>/api/file?path=` | text content, size, binary flag, status, hunks |
-| `GET /p/<name>/raw/<path>` | raw bytes, correct MIME (images, markdown assets) |
+| `GET /p/<name>/raw/<path>` | raw bytes, correct MIME (images, markdown assets), and sandboxed CSP |
 | `GET /p/<name>/api/events` | project-scoped SSE change stream |
 
 The running version is resolved exactly once during `startServer()`, after any
@@ -472,8 +472,22 @@ hostname/project document-title contract.
   carries whatever path was loaded when it fired, so if the user has since
   navigated away it drops out instead of re-rendering the old file and writing
   that path back to `location.hash` (issue #26).
-- **Binary/images**: images render via `/raw/`; other binaries show a
-  metadata card with a download link.
+- **File kinds**: raster binaries and text SVG files render as images from
+  `/raw/`; other binaries show a metadata card with a download link. SVG opens
+  rendered by default through an `<img>` element, never inline markup. Its
+  header Source/Rendered chip reuses Markdown's per-file `raw` state. Source
+  mode uses the existing XML-highlighted code view, line marks, diff popups,
+  and Copy raw. The header shows the git change count in rendered mode but
+  hides its mark-navigation arrows until source mode. Every successful image
+  file refresh changes the image URL revision, so same-size edits reload.
+  If an SVG cannot decode, the viewer opens its source with a short notice;
+  binary files with an `.svg` suffix retain the download card.
+  Raw responses carry `sandbox; default-src 'none'; style-src 'unsafe-inline';
+  img-src data:`. This keeps embedded images visible while blocking script and
+  external fetches when a raw SVG is opened as a document.
+  The image view uses a checkerboard of Catppuccin Latte and Mocha base colors
+  in both themes. HTML remains a code view; its rendered half is still open
+  under issue #22.
 
 All file-derived rich HTML insertion paths are sanitized: rendered Markdown
 (including highlighted fences), highlighted code, and diff2html popup output.

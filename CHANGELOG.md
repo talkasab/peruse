@@ -12,6 +12,8 @@ date and becomes the GitHub release notes (see
 ## [Unreleased]
 
 ### Added
+- SVG files now open as images with a Source toggle for highlighted XML,
+  change marks, and diff popups; edits refresh the rendered image (#22)
 - Links to folders now open `index.md` or `README.md` and select the folder in
   the tree (#36)
 
@@ -26,6 +28,8 @@ date and becomes the GitHub release notes (see
 - Bun 1.4.0 or newer is required (#37)
 
 ### Fixed
+- Raw files opened directly can no longer run scripts; raster image edits now
+  refresh in the viewer, and invalid SVG previews open their source (#22)
 - Landing and project pages now retry failed project-list requests and offer a
   Retry button when the server is unavailable (#44)
 - Root-absolute, extensionless, and queried Markdown links, cross-file

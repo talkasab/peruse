@@ -907,6 +907,13 @@ table.fm-card {
 
 .image-view {
   padding: 24px;
+  background-image: conic-gradient(
+    var(--ctp-latte-base) 25%,
+    var(--ctp-mocha-base) 0 50%,
+    var(--ctp-latte-base) 0 75%,
+    var(--ctp-mocha-base) 0
+  );
+  background-size: 40px 40px;
 }
 .image-view img {
   max-width: 100%;

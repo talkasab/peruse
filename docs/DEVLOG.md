@@ -4,6 +4,45 @@ Narrative record of work sessions — what changed, what we learned, and why.
 Newest first. (The [CHANGELOG](../CHANGELOG.md) is the user-facing summary;
 this is the engineering story.)
 
+## 2026-09-23 — SVG image and source views (#22)
+
+- SVG fell through to XML code because the image branch only handled binary
+  raster files. A new file-kind unit test failed on the absent classifier, and
+  Chromium timed out waiting for an SVG image before the client change.
+- Text SVG now opens through the `/raw/` image URL. The header's existing
+  `raw` state switches to the XML-highlighted source, where line marks,
+  popups, and Copy raw remain available. Rendered mode keeps the change count
+  but hides arrows that have no line anchors. Every successful SVG file fetch
+  changes the image URL revision, including after same-size edits.
+- The image view uses a Catppuccin Latte/Mocha checkerboard under both themes.
+  Chromium checks the image dimensions, source toggle, modified-file mark and
+  popup, live edits in both modes, and a hostile SVG whose script and external
+  image reference make no browser request or console message. HTML rendering
+  remains open on issue #22.
+- Review round: the raw SVG integration test found no CSP header, and a
+  top-level Chromium navigation raised an alert. The beacon listener also
+  received the SVG's request. Every `/raw/` response now carries a sandboxed
+  CSP that blocks scripts and external requests; the SVG still renders as an
+  image. A separate browser test checks seven hostile SVG cases with local
+  server-side beacon counts and zero dialogs.
+- A raster PNG edit failed to change the displayed image before the fix.
+  Image URL revisions now cover raster files as well as SVG. Empty and
+  non-SVG text files with an `.svg` suffix failed to open source automatically
+  before the fix; an image error now switches to source with a notice. Binary
+  `.svg` files keep the download card because they have no text source. The
+  classifier test uses an optional export lookup, so a dev comparison fails
+  on the expected value instead of a missing named import.
+- Source/Rendered mode resets when a user selects another file, matching the
+  existing Markdown toggle. The two-color checkerboard measures about 14.5:1
+  contrast between squares; it makes transparency obvious but can obscure
+  mid-tone art over a dark square. Both remain design tradeoffs.
+- Initial verification passed `bun run check` (47 Biome files and both TypeScript
+  projects), `bun run test` (174 tests, 557 assertions), and `bun run test:e2e`
+  (67 tests, 676 assertions across three Bun processes).
+- Final review verification passed `bun run check` (50 Biome files and both
+  TypeScript projects), `bun run test` (175 tests, 565 assertions), and
+  `bun run test:e2e` (71 tests, 702 assertions across three Bun processes).
+
 ## 2026-09-22 — Markdown links across content roots and folders (#40, #36)
 
 - Review round: a query-bearing absolute link was RED in both unit and Chromium

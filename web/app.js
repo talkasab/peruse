@@ -46,6 +46,7 @@ import langMdsvex from "./langs/mdsvex.js";
 import {
   esc,
   exceedsLineLimit,
+  fileView,
   fmtSize,
   hunkRange,
   langForPath as libLangForPath,
@@ -113,7 +114,6 @@ const MAX_HL_SIZE = 1_000_000,
   MAX_SVX_HL_LINES = 3500,
   MULTI_MARK_HEIGHT = 6,
   MULTI_MARK_GAP = 2;
-const IMG_EXTS = new Set(["png", "jpg", "jpeg", "gif", "webp", "ico", "avif", "bmp"]);
 const sanitizeHTML = createHTMLSanitizer(window);
 const routeMatch = location.pathname.match(/^\/p\/([^/]+)\/?$/);
 const projectName = routeMatch ? decodeURIComponent(routeMatch[1]) : null;
@@ -247,6 +247,8 @@ Alpine.data("peruse", () => ({
   showIgnored: true,
   file: /** @type {FileData | null} */ (null),
   raw: false,
+  svgLoadError: false,
+  imageRevision: Date.now(),
   wrap: false,
   wrapAvailable: false,
   copyState: /** @type {"idle" | "copied" | "error"} */ ("idle"),
@@ -456,7 +458,13 @@ Alpine.data("peruse", () => ({
     if (p && p !== this.file?.path) this.selectFile(p);
   },
   get isMarkdown() {
-    return /\.(md|markdown)$/i.test(this.file?.path ?? "");
+    return this.fileView.kind === "markdown";
+  },
+  get fileView() {
+    return fileView(this.file?.path ?? "", this.file?.binary ?? false);
+  },
+  get svgRendered() {
+    return this.fileView.kind === "image" && this.fileView.sourceToggle && !this.raw;
   },
   // Only modified/deleted hunks have popups; additions are already visible.
   get reviewable() {
@@ -565,7 +573,11 @@ Alpine.data("peruse", () => ({
     const scroll = preserve ? this.$refs.scroll.scrollTop : 0;
     const panels = preserve ? this.panelState() : [];
     this.file = data;
-    if (!preserve) this.raw = false;
+    this.imageRevision++;
+    if (!preserve) {
+      this.raw = false;
+      this.svgLoadError = false;
+    }
     if (!preserve) this.selectedDirectory = directory;
     this.expandTo(path);
     if (!preserve && location.hash !== `#/${path}`) location.hash = `#/${path}`;
@@ -582,16 +594,24 @@ Alpine.data("peruse", () => ({
     v.innerHTML = "";
     this.wrapAvailable = false;
     if (!f) return;
-    const ext = f.path.split(".").pop()?.toLowerCase() ?? "";
-    if (f.binary && IMG_EXTS.has(ext)) {
-      v.innerHTML = `<div class="image-view"><img src="${projectBase}/raw/${escAttr(f.path)}"></div>`;
+    const view = this.fileView;
+    if (view.kind === "image" && (!view.sourceToggle || !this.raw)) {
+      v.innerHTML = `<div class="image-view"><img src="${projectBase}/raw/${escAttr(f.path)}?v=${this.imageRevision}" alt="${escAttr(f.path)}"></div>`;
+      if (view.sourceToggle) {
+        const image = v.querySelector("img");
+        image?.addEventListener("error", () => {
+          if (this.file !== f || this.raw || !image.isConnected) return;
+          this.svgLoadError = true;
+          this.raw = true;
+        });
+      }
     } else if (f.binary) {
       v.innerHTML =
         `<div class="file-card"><div class="fc-name">${esc(f.path)}</div>` +
         `<div class="fc-meta">binary file · ${fmtSize(f.size)}` +
         `${f.status ? ` · git: ${f.status}` : ""}</div>` +
         `<a class="chip" href="${projectBase}/raw/${escAttr(f.path)}" download>Download</a></div>`;
-    } else if (this.isMarkdown && !this.raw) {
+    } else if (view.kind === "markdown" && !this.raw) {
       this.renderMarkdown(v, f);
     } else {
       this.renderCode(v, f);
@@ -760,7 +780,10 @@ Alpine.data("peruse", () => ({
     const big = plainFallback(f);
     const lang = this.isMarkdown ? "markdown" : langForPath(f.path);
     v.innerHTML = sanitizeHTML(
-      (big ? `<div class="notice">Large file — syntax highlighting disabled</div>` : "") +
+      (this.svgLoadError && this.fileView.kind === "image"
+        ? `<div class="notice">SVG preview unavailable; showing source</div>`
+        : "") +
+        (big ? `<div class="notice">Large file — syntax highlighting disabled</div>` : "") +
         (big ? plainPre(f.content) : hlCode(f.content, lang)),
     );
     const lines = /** @type {NodeListOf<HTMLElement>} */ (v.querySelectorAll(".line"));
