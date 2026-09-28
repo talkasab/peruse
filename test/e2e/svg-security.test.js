@@ -1,4 +1,5 @@
-import { expect, test } from "bun:test";
+import { afterAll, expect, test } from "bun:test";
+import { randomUUID } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -7,8 +8,14 @@ import { launchBrowser, makePlainDir, startFixtureServer } from "../fixture.js";
 const wrap = (body) =>
   `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="24" height="24"><rect width="24" height="24" fill="red"/>${body}</svg>`;
 
+const beacons = [];
+afterAll(() => {
+  for (const beacon of beacons) beacon.stop();
+});
+
 async function securityFixture() {
   const hits = [];
+  const prefix = `/svg-probe-${randomUUID()}/`;
   const beacon = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
@@ -17,8 +24,9 @@ async function securityFixture() {
       return new Response("ok");
     },
   });
+  beacons.push(beacon);
   const origin = `http://127.0.0.1:${beacon.port}`;
-  const marker = (name) => `${origin}/${name}`;
+  const marker = (name) => `${origin}${prefix}${name}`;
   const vectors = {
     script: `<script>fetch('${marker("script")}');alert('SVG_SCRIPT_RAN')</script>`,
     onload: `<g onload="fetch('${marker("child-onload")}');alert('SVG_CHILD_ONLOAD')"/>`,
@@ -39,8 +47,10 @@ async function securityFixture() {
         : wrap(body);
     writeFileSync(join(root, `${name}.svg`), svg);
   }
-  return { root, hits, beacon, vectors };
+  return { root, hits, prefix, vectors };
 }
+
+const probeHits = (fixture) => fixture.hits.filter((path) => path.startsWith(fixture.prefix));
 
 test("top-level raw SVG cannot run script or contact a beacon, while embedded image renders", async () => {
   const fixture = await securityFixture();
@@ -57,15 +67,14 @@ test("top-level raw SVG cannot run script or contact a beacon, while embedded im
     await page.goto(`${server.base}/raw/script.svg`);
     await page.waitForTimeout(200);
     expect(dialogs).toEqual([]);
-    expect(fixture.hits).toEqual([]);
+    expect(probeHits(fixture)).toEqual([]);
     await page.goto(`${server.base}/#/script.svg`);
     await page.waitForFunction(() => document.querySelector("#viewer img")?.naturalWidth === 24);
     expect(dialogs).toEqual([]);
-    expect(fixture.hits).toEqual([]);
+    expect(probeHits(fixture)).toEqual([]);
   } finally {
     await browser?.close();
     await server?.cleanup();
-    fixture.beacon.stop();
   }
 }, 20_000);
 
@@ -85,7 +94,7 @@ test("all seven hostile SVG vectors stay inert in the rendered view", async () =
       await page.goto(`${server.base}/#/${name}.svg`);
       await page.waitForFunction(() => document.querySelector("#viewer img")?.naturalWidth === 24);
       await page.waitForTimeout(100);
-      expect({ name, dialogs, hits: fixture.hits }).toEqual({ name, dialogs: [], hits: [] });
+      expect({ name, dialogs, hits: probeHits(fixture) }).toEqual({ name, dialogs: [], hits: [] });
       expect(await page.locator("#viewer svg, #viewer script, #viewer foreignObject").count()).toBe(
         0,
       );
@@ -93,6 +102,5 @@ test("all seven hostile SVG vectors stay inert in the rendered view", async () =
   } finally {
     await browser?.close();
     await server?.cleanup();
-    fixture.beacon.stop();
   }
 }, 30_000);

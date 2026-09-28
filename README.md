@@ -56,6 +56,31 @@ peruse is read-only with respect to every directory it serves. Its only
 persistent application data is the project registry under
 `~/.config/peruse/`, and it binds to localhost only by default.
 
+### Showing ignored paths
+
+Add `.peruseshow` to a project's served root to browse selected paths that
+Git ignores. For example:
+
+```gitignore
+# .peruseshow
+docs/generated/
+.agents/scratch/
+build/reports/*.html
+```
+
+Use one pattern per line. Blank lines and lines beginning with `#` are ignored.
+A leading or internal `/` anchors a pattern to the served root. A trailing `/`
+selects directories. Names without a leading or internal slash can match at
+any depth.
+`*` and `**` follow Bun's
+glob rules. Leading spaces are part of a pattern. Negation is unsupported.
+To open an ignored directory, name it or a descendant through complete,
+literal directory segments. A bare file glob such as `*.local.md` matches
+files only in directories the tree already walks.
+Matched directories and their files remain dimmed and respond to **hide
+ignored**. Peruse reads the file again on the next tree refresh, so edits take
+effect while the server runs. This file applies only to that project.
+
 ### Browsing from other machines (LAN / Tailscale)
 
 ```bash

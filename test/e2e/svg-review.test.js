@@ -88,6 +88,15 @@ test("invalid SVG opens its source while binary SVG keeps the download card", as
     await page.goto(`${server.base}/#/binary.svg`);
     await page.locator("#viewer .file-card").waitFor();
     expect(await page.locator("#viewer .file-card a[download]").count()).toBe(1);
+    await page.waitForFunction(
+      () =>
+        [...document.querySelectorAll("button")].every(
+          (button) =>
+            button.textContent?.trim() !== "Source" || button.getClientRects().length === 0,
+        ),
+      undefined,
+      { timeout: 3_000 },
+    );
     expect(await page.getByRole("button", { name: "Source" }).count()).toBe(0);
   } finally {
     await browser?.close();

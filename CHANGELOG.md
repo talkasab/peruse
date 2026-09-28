@@ -12,6 +12,8 @@ date and becomes the GitHub release notes (see
 ## [Unreleased]
 
 ### Added
+- Projects can use `.peruseshow` to browse and live-update selected gitignored
+  paths while keeping them dimmed in the tree (#48)
 - SVG files now open as images with a Source toggle for highlighted XML,
   change marks, and diff popups; edits refresh the rendered image (#22)
 - Links to folders now open `index.md` or `README.md` and select the folder in
