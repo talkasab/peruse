@@ -238,6 +238,7 @@ Alpine.data("peruse", () => ({
   tree: /** @type {TreeNode[]} */ ([]),
   isRepo: false,
   branchState: /** @type {BranchState | null} */ (null),
+  routeReady: false,
   root: "",
   open: /** @type {Set<string>} */ (new Set()),
   changedOnly: false,
@@ -291,6 +292,9 @@ Alpine.data("peruse", () => ({
       this.loading = false;
     });
     await this.refreshTree();
+    // The route is only announced once its tree and branch response are in, so
+    // the title (and the header) never describe a route that has not loaded.
+    this.updateTitle(this.projectName);
     this.connect();
     this.onHash();
   },
@@ -333,6 +337,9 @@ Alpine.data("peruse", () => ({
   /** @param {string | null} routeName */
   updateTitle(routeName) {
     if (!this.hostname) return;
+    // A project route claims its title only when routeReady: the title is the
+    // signal that this route's tree and branch response have been applied.
+    if (routeName && !this.routeReady) return;
     const project = this.projects.find(
       (candidate) => candidate.routeName === routeName && !candidate.missing,
     );
@@ -342,7 +349,8 @@ Alpine.data("peruse", () => ({
   switchProject(routeName) {
     if (routeName && routeName !== this.requestedProject) {
       this.requestedProject = routeName;
-      this.updateTitle(routeName);
+      // The destination page titles itself once its route is ready; writing the
+      // title here would announce a route this page has not loaded.
       location.href = this.projectHref(routeName);
     }
   },
@@ -385,6 +393,7 @@ Alpine.data("peruse", () => ({
     this.isRepo = d.isRepo;
     this.root = d.root;
     this.branchState = d.branchState;
+    this.routeReady = true;
   },
   /** @param {TreeNode} row */
   rowClick(row) {

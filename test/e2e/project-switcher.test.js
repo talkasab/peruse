@@ -37,6 +37,9 @@ test(
     writeFileSync(join(beta, "README.md"), "# Beta\n");
     git(beta, "add", ".");
     git(beta, "commit", "-qm", "initial");
+    // Name the initial branch explicitly: the assertions below must not depend
+    // on the machine's default init.defaultBranch.
+    git(beta, "branch", "-M", "main");
     git(beta, "worktree", "add", "-qb", "topic", worktree);
 
     const configFile = registryPath(configDir);
@@ -106,6 +109,11 @@ test(
       );
       await page.waitForTimeout(750);
       expect(new URL(page.url()).pathname).toBe(`/p/${encodeURIComponent(parent.name)}/`);
+      // The destination page only claims the title once its route is ready, so
+      // this waits for that state instead of sampling it.
+      await page.waitForFunction((title) => document.title === title, switchedTitle, {
+        timeout: 8_000,
+      });
       expect(await page.title()).toBe(switchedTitle);
 
       await page.locator(".project-switcher").selectOption(routeName);
@@ -114,6 +122,19 @@ test(
       await page.waitForFunction((title) => document.title === title, worktreeTitle);
       expect(await page.locator(".project-switcher").inputValue()).toBe(routeName);
       expect(await page.title()).toBe(worktreeTitle);
+      // Bounded retry for the route-ready state (tree + branch response) before
+      // reading the header, instead of sampling it the moment the title matches.
+      await page.waitForFunction(
+        () => {
+          const app = window.Alpine.$data(document.body);
+          return (
+            app.routeReady === true &&
+            document.querySelector(".branch-state")?.textContent === "topic"
+          );
+        },
+        null,
+        { timeout: 8_000 },
+      );
       expect(await page.locator(".branch-state").innerText()).toBe("topic");
 
       await page.selectOption(".project-switcher", parent.name);
@@ -121,9 +142,11 @@ test(
         `http://127.0.0.1:${server.port}/p/${encodeURIComponent(parent.name)}/`,
       );
       await page.waitForFunction(
-        () => document.querySelector(".branch-state")?.textContent === "master",
+        () => document.querySelector(".branch-state")?.textContent === "main",
+        null,
+        { timeout: 8_000 },
       );
-      expect(await page.locator(".branch-state").innerText()).toBe("master");
+      expect(await page.locator(".branch-state").innerText()).toBe("main");
 
       await page.selectOption(".project-switcher", alphaProject.name);
       await page.waitForURL(
