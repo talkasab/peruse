@@ -11,6 +11,11 @@ date and becomes the GitHub release notes (see
 
 ## [Unreleased]
 
+### Fixed
+- The **Download** chip on a binary file's card now starts a real download.
+  The viewer's click handler treated the chip's in-app href as an internal link,
+  cancelling the click and rewriting `location.hash` instead (#46)
+
 ## [1.1.0] - 2026-08-07
 
 ### Fixed
@@ -124,7 +129,7 @@ date and becomes the GitHub release notes (see
   helpers), integration (server + git + SSE contracts over HTTP), and core
   Playwright E2E journeys, with regression tests tagged to past incidents
 
-[Unreleased]: https://github.com/talkasab/peruse/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/talkasab/peruse/releases/tag/v1.1.0
 [1.1.0]: https://github.com/talkasab/peruse/releases/tag/v1.1.0
 [1.0.1]: https://github.com/talkasab/peruse/releases/tag/v1.0.1
 [1.0.0]: https://github.com/talkasab/peruse/releases/tag/v1.0.0

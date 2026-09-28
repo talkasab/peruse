@@ -970,7 +970,10 @@ Alpine.data("peruse", () => ({
   /** @param {MouseEvent} e @param {HTMLAnchorElement} a */
   interceptLink(e, a) {
     const href = a.getAttribute("href");
-    if (!href || /^([a-z][a-z0-9+.-]*:|\/\/|#)/i.test(href)) return false;
+    // The binary file card's Download chip must reach the browser's own
+    // download action: cancelling the click suppresses it entirely.
+    if (!href || a.hasAttribute("download")) return false;
+    if (/^([a-z][a-z0-9+.-]*:|\/\/|#)/i.test(href)) return false;
     e.preventDefault();
     if (!this.file) return false;
     const dir = this.file.path.split("/").slice(0, -1).join("/");
