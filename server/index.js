@@ -4,6 +4,7 @@ import { existsSync, watch as fsWatch, lstatSync, readdirSync, statSync } from "
 import { hostname } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { readPeruseShow } from "./peruseshow.js";
 import {
   createProjectEnumerator,
   gitSummary,
@@ -43,6 +44,7 @@ import {
  * @property {string} base
  * @property {Map<string, string>} status
  * @property {Set<string>} ignored
+ * @property {Awaited<ReturnType<typeof readPeruseShow>>} [show]
  * @property {BranchState | null} branchState
  */
 
@@ -200,7 +202,8 @@ export async function gitStatus(root) {
   const info = await gitInfo(root);
   const status = new Map();
   const ignored = new Set();
-  if (!info.isRepo) return { ...info, base: EMPTY_TREE, status, ignored, branchState: null };
+  const show = await readPeruseShow(root);
+  if (!info.isRepo) return { ...info, base: EMPTY_TREE, status, ignored, show, branchState: null };
 
   const st = await git(
     root,
@@ -285,13 +288,26 @@ export async function gitStatus(root) {
     }
     branchState = { head: branchHead, base: baseBranch, ahead, behind, detached: false };
   }
-  return { ...info, base, status, ignored, branchState };
+  return { ...info, base, status, ignored, show, branchState };
 }
 
 const MAX_DIR_ENTRIES = 500;
 
-/** @param {string} root @param {GitState} gs @param {string} [dir] @returns {TreeNode[]} */
-export function buildTree(root, gs, dir = "") {
+/** @param {GitState} gs @param {string} path */
+function isIgnoredPath(gs, path) {
+  if (gs.ignored.has(path) || gs.ignored.has(`${path}/`)) return true;
+  const parts = path.split("/");
+  for (let i = 1; i < parts.length; i++)
+    if (gs.ignored.has(`${parts.slice(0, i).join("/")}/`)) return true;
+  return false;
+}
+
+/**
+ * @param {string} root @param {GitState} gs @param {string} [dir]
+ * @param {boolean} [insideIgnored] @param {boolean} [allowedAncestor]
+ * @returns {TreeNode[]}
+ */
+export function buildTree(root, gs, dir = "", insideIgnored = false, allowedAncestor = false) {
   /** @type {TreeNode[]} */
   const nodes = [];
   let entries;
@@ -303,14 +319,14 @@ export function buildTree(root, gs, dir = "") {
   entries.sort(
     (a, b) => Number(b.isDirectory()) - Number(a.isDirectory()) || a.name.localeCompare(b.name),
   );
-  for (const e of entries) {
+  for (const [entryIndex, e] of entries.entries()) {
     if (e.name === ".git") continue;
     // Junk dirs that aren't gitignored (caches, browser profiles) can hold
     // tens of thousands of entries — cap per directory so the tree JSON and
     // the DOM stay sane.
     if (nodes.length >= MAX_DIR_ENTRIES) {
       nodes.push({
-        name: `… ${entries.length - nodes.length} more entries not shown`,
+        name: `… ${entries.length - entryIndex} more entries not shown`,
         path: `${dir}/…`,
         truncated: true,
       });
@@ -318,9 +334,14 @@ export function buildTree(root, gs, dir = "") {
     }
     const rel = dir ? `${dir}/${e.name}` : e.name;
     if (e.isDirectory()) {
-      const isIgnored = gs.ignored.has(`${rel}/`);
-      // Ignored dirs are shown (dimmed) but not walked — keeps the tree small.
-      const children = isIgnored ? [] : buildTree(root, gs, rel);
+      const isIgnored = isIgnoredPath(gs, rel);
+      const allowed = gs.show?.allows(rel, true) ?? false;
+      const mayContain = gs.show?.mayContain(rel) ?? false;
+      if (insideIgnored && !allowedAncestor && !allowed && !mayContain) continue;
+      const walk = !isIgnored || allowed || mayContain;
+      const children = walk
+        ? buildTree(root, gs, rel, insideIgnored || isIgnored, allowedAncestor || allowed)
+        : [];
       // VS Code-style folder decoration: flag dirs containing any change.
       nodes.push({
         name: e.name,
@@ -331,12 +352,13 @@ export function buildTree(root, gs, dir = "") {
         dirty: children.some((c) => (c.dir ? c.dirty : !!c.status)),
       });
     } else if (e.isFile()) {
+      if (insideIgnored && !allowedAncestor && !gs.show?.allows(rel, false)) continue;
       nodes.push({
         name: e.name,
         path: rel,
         dir: false,
         status: gs.status.get(rel) ?? null,
-        ignored: gs.ignored.has(rel),
+        ignored: isIgnoredPath(gs, rel),
       });
     }
   }
@@ -443,19 +465,39 @@ export async function createProjectRuntime(root, target, watchFactory = fsWatch)
   // gitStatus refreshes the event filter when the tree is requested.
   /** @type {Set<string>} */
   let ignoredDirs = new Set();
+  /** @type {GitState["show"]} */
+  let show;
   /** @param {GitState} gs */
   const rememberIgnored = (gs) => {
     ignoredDirs = new Set(
       [...gs.ignored].filter((p) => p.endsWith("/")).map((p) => p.slice(0, -1)),
     );
+    show = gs.show;
     return gs;
+  };
+  /** @param {string} rel */
+  const allowedEvent = (rel) => {
+    let directory = ignoredDirs.has(rel);
+    if (!directory) {
+      try {
+        directory = lstatSync(join(root, rel), { throwIfNoEntry: false })?.isDirectory() ?? false;
+      } catch {
+        directory = false;
+      }
+    }
+    return !!(show?.allows(rel, directory) || show?.mayContain(rel));
   };
   /** @param {string} rel */
   const inIgnoredDir = (rel) => {
     const parts = rel.split("/");
-    for (let i = 1; i <= parts.length; i++)
-      if (ignoredDirs.has(parts.slice(0, i).join("/"))) return true;
-    return false;
+    let ignored = false;
+    for (let i = 1; i <= parts.length; i++) {
+      const ancestor = parts.slice(0, i).join("/");
+      if (!ignoredDirs.has(ancestor)) continue;
+      ignored = true;
+      if (!show?.allows(ancestor, true) && !show?.mayContain(ancestor)) return true;
+    }
+    return ignored && !allowedEvent(rel);
   };
   rememberIgnored(await gitStatus(root));
 
@@ -477,9 +519,9 @@ export async function createProjectRuntime(root, target, watchFactory = fsWatch)
   // events, but does not prevent watches from being installed in skipped dirs.
   /** @param {string} rel */
   const skipRel = (rel) =>
-    rel.split("/").includes("node_modules") ||
     rel === ".git/objects" ||
     rel.startsWith(".git/objects/") ||
+    (rel.split("/").includes("node_modules") && !allowedEvent(rel)) ||
     inIgnoredDir(rel);
 
   /** @param {string | null | undefined} filename */
@@ -824,7 +866,7 @@ export async function startServer({
               size: buf.byteLength,
               binary,
               status,
-              ignored: gs.ignored.has(sp.rel),
+              ignored: isIgnoredPath(gs, sp.rel),
               content,
               hunks:
                 gs.isRepo && content !== null

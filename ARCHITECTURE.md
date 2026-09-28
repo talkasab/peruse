@@ -71,7 +71,7 @@ nor directory), but direct paths through them serve normally.
 | `GET /` + assets | landing/client bundle from `dist/` (auto-rebuilt at startup if any file recursively below `web/` is newer — checkout runs only) |
 | `GET /api/projects` | server `os.hostname()` and cached running peruse version, plus registered projects and live worktrees with missing state, last-opened time, and brief branch/change summary |
 | `GET /p/<name>/` | project viewer client; opening it updates the registered parent's `lastOpened`; an unavailable route returns a minimal hostname-titled HTML 404 |
-| `GET /p/<name>/api/tree` | nested JSON tree plus local branch state; per-file git status letter; gitignored flags; per-dir `dirty` flag; ignored dirs listed but not walked; ≤500 entries per dir |
+| `GET /p/<name>/api/tree` | nested JSON tree plus local branch state; per-file git status letter; gitignored flags; per-dir `dirty` flag; ignored dirs listed but walked only when `.peruseshow` permits; ≤500 entries per dir |
 | `GET /p/<name>/api/file?path=` | text content, size, binary flag, status, hunks |
 | `GET /p/<name>/raw/<path>` | raw bytes, correct MIME (images, markdown assets), and sandboxed CSP |
 | `GET /p/<name>/api/events` | project-scoped SSE change stream |
@@ -153,6 +153,21 @@ Plain `git` subprocesses, cwd = served root: `status --porcelain=v2 --branch
 back through the watcher as a git-change event, re-rendering clients whose
 request triggered the status call in the first place.
 
+Each status refresh also reads `.peruseshow` from the served project root.
+Blank lines and lines beginning with `#` do nothing. Each other line is a
+`Bun.Glob` pattern for an ignored path. A leading `/` anchors it to the root;
+a trailing `/` limits it to directories; `*` and `**` follow Bun's glob rules. A pattern
+with an internal slash also anchors to the root; slash-free names can match at
+any depth. Leading spaces are significant. Negation is unsupported. Missing or
+unreadable files yield an empty allowlist. Invalid patterns produce a
+rate-limited warning with the line number, once per project and file content.
+An ignored directory is walked only when a pattern matches it or its complete,
+literal directory prefix. Bare file globs never open ignored directories; they
+match files in directories already walked. A file pattern with literal parent
+segments can open those ignored ancestors. Matching descendants remain
+`ignored: true` in the tree and file API. The tree still skips `.git`, symlinks,
+and special files and caps each directory at 500 entries.
+
 Branch state is computed as part of that same status poll and returned by
 `/api/tree`; there is no branch-only request cadence. Porcelain-v2 branch
 headers provide the current branch and detached commit OID. Local heads select
@@ -191,8 +206,10 @@ the tree for every event and fetch the open file when its path changed, Git
 metadata changed, or the event has an empty path.
 
 `.git/HEAD`, refs, index, and other administrative metadata set `git: true`
-and never enter `changed`. `.git/objects`, `node_modules`, and Git-ignored
-directories are filtered by `skipRel`. Bun passes root-relative paths to its
+and never enter `changed`. `.git/objects` stays filtered. `node_modules` and
+Git-ignored directories are filtered unless `.peruseshow` permits the path;
+matching file paths and their parent-directory events pass the filter. Bun
+passes root-relative paths to its
 `ignore` predicate, which filters events but does not prevent installation of
 watches in those directories. The Git
 ignore set refreshes on every status request. An event with a null or undefined
@@ -304,9 +321,9 @@ hostname/project document-title contract.
   `.md` form before a directory. Query strings are excluded from lookup;
   fragments still scroll after rendering. `/` opens the project-root index,
   then the outermost content-root index, or the tree root when neither exists.
-  Unresolved targets keep the former relative-path behavior. Because ignored
-  directory descendants are absent from the loaded tree, links into those
-  directories also use that fallback (#10). A link to
+  Unresolved targets keep the former relative-path behavior. Links into
+  unwalked ignored directories use that fallback (#10); `.peruseshow` can make
+  selected descendants available in the tree (#48). A link to
   a directory opens its `index.md`, then `README.md` if no index exists, while
   selecting and expanding that folder in the tree. A folder without either
   file is selected and expanded while the current document stays visible.

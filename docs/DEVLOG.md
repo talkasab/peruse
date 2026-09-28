@@ -4,6 +4,53 @@ Narrative record of work sessions — what changed, what we learned, and why.
 Newest first. (The [CHANGELOG](../CHANGELOG.md) is the user-facing summary;
 this is the engineering story.)
 
+## 2026-09-28 — Per-project ignored-path allowlist (#48)
+
+- Review round: `*.local.md` or `n` previously opened every ignored directory.
+  The independent review measured a tree walk rising from 0.1 ms to 41.3 ms
+  with one bare glob and to 641.8 ms with 200 narrow rules plus that glob; its
+  JSON grew from 4 KB to 72 KB. Unit tests failed on both prefix cases and on
+  `docs/generated/` matching under `x/`. A nested `node_modules` fixture also
+  failed when its directories appeared in the tree. The new matcher compares
+  complete literal directory segments, and slash-bearing patterns anchor to
+  the root. Bare file globs match only inside directories already walked.
+- The 500-ignored-directory regression fixture now leaves every directory
+  unwalked. In a seven-run local probe its median tree time was 0.978 ms with
+  no rule, 0.689 ms with `*.local.md`, and 0.661 ms with `n`; all three emitted
+  zero children. A watcher test failed RED when an extensionless file named
+  `build` escaped a directory-only rule, then passed after the watcher checked
+  the real file kind and whether its ignored ancestors were permitted.
+- Leading spaces now remain part of patterns, and malformed-line warnings are
+  limited per project and file content. Both changes had RED unit tests. The
+  new matcher's unit file cannot fail against `dev` beyond its missing import;
+  the integration and browser tests supply behavior-level RED evidence.
+- The combined browser process exposed two SVG test defects. A beacon on an
+  OS-assigned port recorded unrelated `GET /` traffic after port reuse, while
+  every hostile SVG vector requests a named path. Each test fixture now gives
+  its beacon URLs a random path prefix and asserts only on hits under that
+  prefix; `afterAll` closes the beacons. The binary SVG test also polls for the
+  Source chip to disappear, since its header update can follow the file card.
+  The browser command again uses the original three Bun processes.
+- Issue #48 holds the plan and design decisions. Unit tests first failed
+  because the matcher module did not exist. An integration fixture kept
+  `notes/todo.md` out of the tree after adding `.peruseshow`, and Chromium
+  timed out waiting for that file's row. Those failures preceded the code.
+- `.peruseshow` is read from each served root during status refresh. Its
+  `Bun.Glob` rules permit selected ignored directories and files; an exact
+  file rule opens the ignored ancestors needed to reach it. Descendants keep
+  their ignored flag and the browser's dim and hide behavior. The existing
+  500-entry cap and `.git` exclusion still apply.
+- The watcher refreshes its allowlist with the ignored set. It reports edits
+  inside a permitted directory and keeps unrelated ignored paths filtered.
+  The integration fixture checks a live note edit, a filtered `node_modules`
+  edit, and a changed allowlist that exposes `build/out.txt` on the next tree
+  fetch. A file-only rule exposes its target without listing ignored siblings.
+  Chromium opens the note and checks its dimmed and hidden states.
+- Final verification passed `bun run check` (54 Biome files and both TypeScript
+  projects) and `bun run test` (186 tests, 638 assertions). Three consecutive
+  `bun run test:e2e` runs each passed 72 tests and 708 assertions across three
+  Bun processes.
+
 ## 2026-09-23 — SVG image and source views (#22)
 
 - SVG fell through to XML code because the image branch only handled binary
