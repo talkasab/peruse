@@ -11,6 +11,12 @@ date and becomes the GitHub release notes (see
 
 ## [Unreleased]
 
+### Changed
+- The prebuilt client (`/`, `/p/<name>/`, `/app.js`, `/style.css`) is now served
+  with an `ETag` derived from its content and the running version plus
+  `Cache-Control: no-cache`, so browsers revalidate every load and transfer the
+  bundle only when a rebuild actually changed it (#45)
+
 ## [1.1.0] - 2026-08-07
 
 ### Fixed

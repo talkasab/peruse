@@ -1,10 +1,12 @@
 // peruse server: static page + file/git/events API. All rendering is client-side.
 
+import { createHash } from "node:crypto";
 import {
   existsSync,
   watch as fsWatch,
   lstatSync,
   readdirSync,
+  readFileSync,
   realpathSync,
   statSync,
 } from "node:fs";
@@ -121,6 +123,53 @@ function ensureFreshClient() {
     if (r.exitCode !== 0) console.error("peruse: build failed — serving the stale client");
   }
 }
+/**
+ * Cache validation for the prebuilt client. `dist/` is immutable for a given
+ * build, so each file is hashed once at startup; the ETag also carries the
+ * running version, so a rebuild (or a `bunx @peruse` bump) invalidates every
+ * cached copy while an unchanged client transfers nothing but the headers.
+ * @param {string} version
+ * @returns {Map<string, {etag: string, path: string}>}
+ */
+function indexClientAssets(version) {
+  /** @type {Map<string, {etag: string, path: string}>} */
+  const assets = new Map();
+  // A checkout version can hold spaces and parentheses (`v1.1.0 (dev)`), which
+  // would not be a well-formed opaque ETag value.
+  const scope = version.replace(/[^0-9A-Za-z._-]/g, "_");
+  let entries;
+  try {
+    entries = readdirSync(DIST, { withFileTypes: true });
+  } catch {
+    return assets; // no dist/ yet: the routes keep their build-error/404 paths
+  }
+  for (const entry of entries) {
+    if (!entry.isFile()) continue;
+    let bytes;
+    try {
+      bytes = readFileSync(join(DIST, entry.name));
+    } catch {
+      continue;
+    }
+    assets.set(entry.name, {
+      etag: `"${scope}-${createHash("sha256").update(bytes).digest("hex").slice(0, 32)}"`,
+      path: join(DIST, entry.name),
+    });
+  }
+  return assets;
+}
+
+/**
+ * `If-None-Match` may carry a comma-separated list, a `*`, or a weak prefix.
+ * @param {string | null} header
+ * @param {string} etag
+ */
+function etagMatches(header, etag) {
+  if (!header) return false;
+  if (header.trim() === "*") return true;
+  return header.split(",").some((candidate) => candidate.trim().replace(/^W\//, "") === etag);
+}
+
 // Well-known git empty tree — diff base for repos with no commits yet.
 const EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 
@@ -906,6 +955,7 @@ export async function startServer({
 }) {
   ensureFreshClient();
   const runningVersion = await resolveRunningVersion();
+  const clientAssets = indexClientAssets(runningVersion);
   const initialProjects =
     fixedProjects ??
     (root
@@ -919,6 +969,22 @@ export async function startServer({
       : null);
   const registry = () => initialProjects ?? readProjects(configFile);
   const enumerate = createProjectEnumerator({ ttlMs: enumerationTtlMs });
+  /**
+   * Prebuilt-client response with revalidation headers: the browser asks again
+   * on every load and an unchanged file costs one header round trip. Returns
+   * null for an asset that is not part of this build's index.
+   * @param {string} name
+   * @param {Request} req
+   */
+  const clientAssetResponse = (name, req) => {
+    const asset = clientAssets.get(name);
+    if (!asset) return null;
+    const headers = { ETag: asset.etag, "Cache-Control": "no-cache" };
+    if (etagMatches(req.headers.get("if-none-match"), asset.etag))
+      return new Response(null, { status: 304, headers });
+    return new Response(Bun.file(asset.path), { headers });
+  };
+
   /** @type {Map<string, Awaited<ReturnType<typeof createProjectRuntime>>>} */
   const runtimes = new Map();
   /** @type {Map<string, Promise<Awaited<ReturnType<typeof createProjectRuntime>>>>} */
@@ -1111,6 +1177,8 @@ export async function startServer({
                   : registry().find((project) => project.name === target.name);
               if (parent) registerProject(parent.path, { file: configFile });
             }
+            const validated = clientAssetResponse("index.html", req);
+            if (validated) return validated;
             const af = join(DIST, "index.html");
             if (existsSync(af)) return new Response(Bun.file(af));
             return new Response("peruse: no built client found — run `bun run build`", {
@@ -1188,8 +1256,12 @@ export async function startServer({
         // Prebuilt client assets
         const asset = pathname === "/" ? "index.html" : pathname.slice(1);
         const af = resolve(DIST, asset);
-        if (af.startsWith(`${DIST}/`) && existsSync(af) && statSync(af).isFile())
-          return new Response(Bun.file(af));
+        if (af.startsWith(`${DIST}/`)) {
+          const validated = clientAssetResponse(asset, req);
+          if (validated) return validated;
+          // Not part of this build's index (e.g. a nested path): serve as before.
+          if (existsSync(af) && statSync(af).isFile()) return new Response(Bun.file(af));
+        }
         if (pathname === "/")
           return new Response("peruse: no built client found — run `bun run build`", {
             status: 500,

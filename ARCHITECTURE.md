@@ -76,6 +76,15 @@ nor directory), but direct paths through them serve normally.
 | `GET /p/<name>/raw/<path>` | raw bytes, correct MIME (images, markdown assets) |
 | `GET /p/<name>/api/events` | project-scoped SSE change stream |
 
+The prebuilt client is served with cache validation. Every top-level file in
+`dist/` is hashed once at startup and answered with `ETag: "<version>-<sha256>"`
+plus `Cache-Control: no-cache`; a request whose `If-None-Match` carries that tag
+gets a bodyless `304 Not Modified`. A browser therefore revalidates on every
+load but transfers bytes only when a file changed, and because the tag contains
+the running version a rebuild — or a `bunx @talkasab/peruse` bump — invalidates
+every cached copy. This covers `index.html`, `app.js`, `style.css`, and the
+bundled stylesheets; `/` and `/p/<name>/` serve the same tagged `index.html`.
+
 The running version is resolved exactly once during `startServer()`, after any
 checkout client rebuild, and retained in the server closure. Peruse's package
 root is the parent of the directory containing `server/index.js`; that is the
