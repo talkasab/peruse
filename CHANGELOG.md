@@ -11,6 +11,8 @@ date and becomes the GitHub release notes (see
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-10-06
+
 ### Added
 - Projects can use `.peruseshow` to browse and live-update selected gitignored
   paths while keeping them dimmed in the tree (#48)
@@ -20,6 +22,7 @@ date and becomes the GitHub release notes (see
   the tree (#36)
 
 ### Changed
+- Bun 1.4.0 or newer is required (#37)
 - Browsers now revalidate the client page and bundle on every load and
   download them again only after a rebuild or upgrade (#45)
 - YAML frontmatter lists of maps now appear below the document, with count
@@ -29,7 +32,6 @@ date and becomes the GitHub release notes (see
 - Live updates use Bun's native file watcher. Projects with broken symlinks now
   open without a watcher stall; directory swaps and timestamp-preserving
   in-place rewrites remain live (#37)
-- Bun 1.4.0 or newer is required (#37)
 
 ### Fixed
 - The Download chip on binary files now downloads the file (#46)
@@ -158,7 +160,8 @@ date and becomes the GitHub release notes (see
   helpers), integration (server + git + SSE contracts over HTTP), and core
   Playwright E2E journeys, with regression tests tagged to past incidents
 
-[Unreleased]: https://github.com/talkasab/peruse/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/talkasab/peruse/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/talkasab/peruse/releases/tag/v1.2.0
 [1.1.0]: https://github.com/talkasab/peruse/releases/tag/v1.1.0
 [1.0.1]: https://github.com/talkasab/peruse/releases/tag/v1.0.1
 [1.0.0]: https://github.com/talkasab/peruse/releases/tag/v1.0.0
