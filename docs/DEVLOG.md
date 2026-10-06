@@ -4,6 +4,26 @@ Narrative record of work sessions — what changed, what we learned, and why.
 Newest first. (The [CHANGELOG](../CHANGELOG.md) is the user-facing summary;
 this is the engineering story.)
 
+## 2026-10-06 — Release 1.2.0 and branch housekeeping
+
+- 1.2.0 cut per docs/RELEASING.md: changelog rolled with the Bun 1.4.0
+  requirement moved to the top of Changed, `npm version`, `main` fast-forwarded
+  locally. The agent machine's pre-push hook refuses any push of `main`, so
+  `dev` and the tag were pushed and `main` is left for the owner to push. The
+  tag alone ran the workflow: gates, publish with provenance, GitHub release.
+  The registry's packument lagged npm's `+ @talkasab/peruse@1.2.0` line by
+  about four minutes, with the per-version URL answering 404 meanwhile; npm's
+  status page showed no incident.
+- #10 closed in favour of `.peruseshow` (#48). The two parked worktrees were
+  removed with `wt remove` and all seven merged `feat/*`/`fix/*` branches
+  deleted; `wt` retains a branch it finds integrated, so those two went by
+  `git branch -d`.
+- A competitor survey (Sonnet agent, report kept outside the repo) ranked an
+  uncached `gitStatus()` as the main caching gap: each tree and file request
+  spawns four to five git processes and the client refetches on every watcher
+  event. Candidate issues from it are listed in the session notes, not filed
+  yet.
+
 ## 2026-10-04 — Client cache validation (#45) and the download chip (#46)
 
 - Three external pull requests (#47, #49, #50) proposed fixes for #45, #42, and
