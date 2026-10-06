@@ -68,13 +68,25 @@ nor directory), but direct paths through them serve normally.
 
 | Endpoint | Returns |
 |---|---|
-| `GET /` + assets | landing/client bundle from `dist/` (auto-rebuilt at startup if any file recursively below `web/` is newer — checkout runs only) |
+| `GET /` + assets | landing/client bundle from `dist/` (auto-rebuilt at startup if any file recursively below `web/` is newer — checkout runs only), with cache validation |
 | `GET /api/projects` | server `os.hostname()` and cached running peruse version, plus registered projects and live worktrees with missing state, last-opened time, and brief branch/change summary |
-| `GET /p/<name>/` | project viewer client; opening it updates the registered parent's `lastOpened`; an unavailable route returns a minimal hostname-titled HTML 404 |
+| `GET /p/<name>/` | project viewer client, with cache validation; opening it updates the registered parent's `lastOpened`; an unavailable route returns a minimal hostname-titled HTML 404 |
 | `GET /p/<name>/api/tree` | nested JSON tree plus local branch state; per-file git status letter; gitignored flags; per-dir `dirty` flag; ignored dirs listed but walked only when `.peruseshow` permits; ≤500 entries per dir |
 | `GET /p/<name>/api/file?path=` | text content, size, binary flag, status, hunks |
 | `GET /p/<name>/raw/<path>` | raw bytes, correct MIME (images, markdown assets), and sandboxed CSP |
 | `GET /p/<name>/api/events` | project-scoped SSE change stream |
+
+Client files (`/`, the project page, and everything in `dist/`) are answered by
+`clientAsset()` with `Cache-Control: no-cache` and an `ETag`, and with a bodyless
+`304` when a `GET` or `HEAD` sends that tag in `If-None-Match`. Browsers
+therefore revalidate on every load and download a file again only when it
+changed. The tag hashes the running version with the file's size and mtime,
+which are read per request. A rebuild under a running server changes the tag at
+once, and so does an upgrade whose installed files happen to repeat an earlier
+size and mtime. Bun adds validators only to `routes` entries, not to a
+`Bun.file` response returned from `fetch`, and its file routes validate by
+`Last-Modified` date order, which a downgrade to an earlier-installed version
+would satisfy with a stale client.
 
 The running version is resolved exactly once during `startServer()`, after any
 checkout client rebuild, and retained in the server closure. Peruse's package
@@ -490,7 +502,10 @@ hostname/project document-title contract.
   navigated away it drops out instead of re-rendering the old file and writing
   that path back to `location.hash` (issue #26).
 - **File kinds**: raster binaries and text SVG files render as images from
-  `/raw/`; other binaries show a metadata card with a download link. SVG opens
+  `/raw/`; other binaries show a metadata card with a download link. That link
+  is the one anchor exempt from in-app link handling, and only while a binary
+  file is open: a binary view holds no authored HTML, so a `download` anchor
+  written in Markdown still resolves as an ordinary document link. SVG opens
   rendered by default through an `<img>` element, never inline markup. Its
   header Source/Rendered chip reuses Markdown's per-file `raw` state. Source
   mode uses the existing XML-highlighted code view, line marks, diff popups,
@@ -538,7 +553,7 @@ they guard.
   both themes) +
   **integration** (`test/integration/`: real server + real git over HTTP —
   encoded multi-root routes, landing data, source-root version resolution,
-  tree/file/raw contracts, enumeration
+  tree/file/raw contracts, client cache validation, enumeration
   and total Git spawns for a realistic navigation counted through patched
   `Bun.spawn`, cached target identity/missing state, SSE coalescing and gitignore-skip,
   idle-connection survival, port fallback, native recursive watching,
@@ -557,7 +572,8 @@ they guard.
   marks, arrows, links, pinned headers, no body scroll), live updates, theming
   (Latte/Mocha token + popup color flip), mdsvex `.svx` (per-region computed
   colours in both themes, line-for-line source fidelity, gutter marks and
-  popup, oversized-file fallback), and word wrap — while navigation and
+  popup, oversized-file fallback), and word wrap — while navigation (the
+  refresh race and the binary card's download chip) and
   sanitization remain self-contained regressions with their own fixtures,
   servers, and fresh pages. The first two process boundaries are load-bearing:
   cycling their additional Playwright browsers in the shared Bun process can

@@ -115,6 +115,37 @@ function ensureFreshClient() {
     if (r.exitCode !== 0) console.error("peruse: build failed — serving the stale client");
   }
 }
+/**
+ * Serve a prebuilt client file with cache validation: browsers revalidate on
+ * every load and re-download only what changed. The tag covers the file's size
+ * and mtime, read per request so a rebuild under a running server is seen, and
+ * the running version, since package installs can repeat both across releases.
+ * @param {string} path
+ * @param {Request} req
+ * @param {string} version
+ * @returns {Response | null} null when the file does not exist
+ */
+export function clientAsset(path, req, version) {
+  let stat;
+  try {
+    stat = statSync(path);
+  } catch {
+    return null; // missing, or not a path at all (ENOTDIR, ENAMETOOLONG)
+  }
+  if (!stat.isFile()) return null;
+  const etag = `"${Bun.hash(`${version}\0${stat.size}\0${stat.mtimeMs}`).toString(36)}"`;
+  const headers = { ETag: etag, "Cache-Control": "no-cache" };
+  const sent = req.headers.get("if-none-match");
+  const safe = req.method === "GET" || req.method === "HEAD";
+  if (
+    safe &&
+    sent &&
+    (sent.trim() === "*" || sent.split(",").some((tag) => tag.trim().replace(/^W\//, "") === etag))
+  )
+    return new Response(null, { status: 304, headers });
+  return new Response(Bun.file(path), { headers });
+}
+
 // Well-known git empty tree — diff base for repos with no commits yet.
 const EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 
@@ -828,11 +859,12 @@ export async function startServer({
                   : registry().find((project) => project.name === target.name);
               if (parent) registerProject(parent.path, { file: configFile });
             }
-            const af = join(DIST, "index.html");
-            if (existsSync(af)) return new Response(Bun.file(af));
-            return new Response("peruse: no built client found — run `bun run build`", {
-              status: 500,
-            });
+            return (
+              clientAsset(join(DIST, "index.html"), req, runningVersion) ??
+              new Response("peruse: no built client found — run `bun run build`", {
+                status: 500,
+              })
+            );
           }
 
           if (tail === "/api/tree") {
@@ -910,8 +942,8 @@ export async function startServer({
         // Prebuilt client assets
         const asset = pathname === "/" ? "index.html" : pathname.slice(1);
         const af = resolve(DIST, asset);
-        if (af.startsWith(`${DIST}/`) && existsSync(af) && statSync(af).isFile())
-          return new Response(Bun.file(af));
+        const client = af.startsWith(`${DIST}/`) ? clientAsset(af, req, runningVersion) : null;
+        if (client) return client;
         if (pathname === "/")
           return new Response("peruse: no built client found — run `bun run build`", {
             status: 500,

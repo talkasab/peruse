@@ -20,6 +20,8 @@ date and becomes the GitHub release notes (see
   the tree (#36)
 
 ### Changed
+- Browsers now revalidate the client page and bundle on every load and
+  download them again only after a rebuild or upgrade (#45)
 - YAML frontmatter lists of maps now appear below the document, with count
   links in the header card; aliases share one footer (#43)
 - YAML frontmatter now shows nested fields, tags, source tables, and clickable
@@ -30,6 +32,7 @@ date and becomes the GitHub release notes (see
 - Bun 1.4.0 or newer is required (#37)
 
 ### Fixed
+- The Download chip on binary files now downloads the file (#46)
 - Raw files opened directly can no longer run scripts; raster image edits now
   refresh in the viewer, and invalid SVG previews open their source (#22)
 - Landing and project pages now retry failed project-list requests and offer a

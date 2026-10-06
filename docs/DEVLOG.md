@@ -4,6 +4,45 @@ Narrative record of work sessions — what changed, what we learned, and why.
 Newest first. (The [CHANGELOG](../CHANGELOG.md) is the user-facing summary;
 this is the engineering story.)
 
+## 2026-10-04 — Client cache validation (#45) and the download chip (#46)
+
+- Three external pull requests (#47, #49, #50) proposed fixes for #45, #42, and
+  #46. Each was read in full and run in a scratch worktree before any decision;
+  all were closed and the two fixes written here. Their branches were cut from
+  `main`, so resolving the conflicts toward them would have dropped six e2e
+  files from `test:e2e`, the SVG security tests among them.
+- #45 as filed asked for a content hash computed once at startup. Run that way,
+  appending to `dist/style.css` under a live server returned the new bytes with
+  the old tag, and the next revalidation answered `304`. `clientAsset()` builds
+  the tag per request from the running version and the file's size and mtime,
+  one `statSync` the handler already made.
+- Bun's own file routes were measured on 1.4.2 as the smaller alternative. A
+  `routes` entry holding `new Response(Bun.file(path))` emits `Last-Modified`
+  and answers `If-Modified-Since` with `304`; the same response returned from
+  `fetch` carries no validator. They were not used: Bun gives installed package
+  files the time they first entered its cache, so a downgrade serves files
+  dated earlier than the browser's copy and a date-ordered check keeps the
+  newer client. An exact-match tag that includes the version has no such case.
+- #46: the chip's project-relative `href` went through `interceptLink`, which
+  cancelled the click. The browser test timed out waiting for the download
+  event before the fix. Exempting every `download` anchor, as #50 did, also
+  released Markdown-authored ones: a probe showed `<a href="other.md" download>`
+  starting a failed download of `/p/project/other.md` where it had opened
+  `other.md` in the viewer. The exemption applies only while a binary file is
+  open, when the viewer holds nothing but the app's own card; the test's second
+  half clicks an authored `download` link and counts no further download.
+- Independent review found one regression in the first draft: `statSync` with
+  `throwIfNoEntry: false` still throws `ENOTDIR` and `ENAMETOOLONG`, so
+  `/app.js/x` and a 300-character path returned Bun's 500 error page, source
+  excerpt included, where they had returned 404. `clientAsset()` now treats any
+  stat failure as a miss, with those paths in the integration test. The review
+  also showed two assertions that survived mutation (HEAD revalidation, and the
+  size term of the tag); both now fail when the code is mutated.
+- #42's remaining change, holding the title until `/api/tree` answers, was
+  measured and left out: with the tree request failing, the tab kept the plain
+  `peruse` title and the root label stayed hidden, where today both identify
+  the project.
+
 ## 2026-09-28 — Per-project ignored-path allowlist (#48)
 
 - Review round: `*.local.md` or `n` previously opened every ignored directory.

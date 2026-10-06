@@ -1076,6 +1076,9 @@ Alpine.data("peruse", () => ({
   interceptLink(e, a) {
     const href = a.getAttribute("href");
     if (!href) return false;
+    // The binary card's Download chip keeps the browser's own download action.
+    // A binary view holds no authored HTML, so no document link can claim this.
+    if (this.file?.binary && a.hasAttribute("download")) return false;
     if (href.startsWith("#")) {
       e.preventDefault();
       this.scrollToFragment(href.slice(1), a.classList.contains("fm-jump"));
